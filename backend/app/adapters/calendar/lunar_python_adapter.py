@@ -1,13 +1,13 @@
 """lunar_python adapter — primary calendar engine.
 
 The adapter returns the four pillars plus the deterministic detail fields used
-by the mobile chart UI.  No interpretation is performed here: every value is
+by the mobile chart UI. No interpretation is performed here: every value is
 read from lunar_python or derived from versioned core tables.
 """
 from __future__ import annotations
 
 import time as _time
-from datetime import datetime
+from datetime import datetime, tzinfo
 from functools import lru_cache
 from typing import Any
 
@@ -17,7 +17,6 @@ from ...domain.chart import EngineVersion, Fact
 from ...domain.pillars import Branch, FourPillars, Pillar, Stem
 from ...domain.rules import evaluate_shensha
 from .base import CalendarAdapter, CalendarResult
-
 
 _ELEMENT_ZH = {
     "wood": "木",
@@ -67,7 +66,12 @@ def _safe_call(obj: Any, method: str, default: object = "") -> object:
     return default if result is None else result
 
 
-def _solar_to_datetime(value: Any, tzinfo: object) -> datetime:
+def _safe_list(obj: Any, method: str) -> list[object]:
+    value = _safe_call(obj, method, [])
+    return list(value) if isinstance(value, (list, tuple)) else []
+
+
+def _solar_to_datetime(value: Any, zone: tzinfo) -> datetime:
     return datetime(
         int(value.getYear()),
         int(value.getMonth()),
@@ -75,7 +79,7 @@ def _solar_to_datetime(value: Any, tzinfo: object) -> datetime:
         int(value.getHour()),
         int(value.getMinute()),
         int(value.getSecond()),
-        tzinfo=tzinfo,  # type: ignore[arg-type]
+        tzinfo=zone,
     )
 
 
@@ -109,8 +113,6 @@ class LunarPythonAdapter(CalendarAdapter):
         if calculation_time.tzinfo is None:
             raise ValueError("calculation_time must be timezone-aware")
 
-        # lunar_python consumes wall-clock fields and has no timezone model. The
-        # caller therefore passes the selected civil/true-solar calculation time.
         local_naive = calculation_time.replace(tzinfo=None)
         solar = Solar.fromYmdHms(
             local_naive.year,
@@ -183,7 +185,6 @@ class LunarPythonAdapter(CalendarAdapter):
         )
 
     def nearest_jie(self, calculation_time: datetime, *, forward: bool) -> datetime:
-        """Return the precise next/previous 节 instant in the adapter time basis."""
         if calculation_time.tzinfo is None:
             raise ValueError("calculation_time must be timezone-aware")
         local = calculation_time.replace(tzinfo=None)
@@ -192,8 +193,7 @@ class LunarPythonAdapter(CalendarAdapter):
         )
         lunar = solar.getLunar()
         jie = lunar.getNextJie(False) if forward else lunar.getPrevJie(False)
-        value = jie.getSolar()
-        return _solar_to_datetime(value, calculation_time.tzinfo)
+        return _solar_to_datetime(jie.getSolar(), calculation_time.tzinfo)
 
     def _build_details(
         self,
@@ -216,10 +216,8 @@ class LunarPythonAdapter(CalendarAdapter):
         hidden_counts = {element: 0 for element in "木火土金水"}
 
         for position, prefix, pillar in position_defs:
-            hidden = list(_safe_call(eight_char, f"get{prefix}HideGan", []))
-            hidden_ten_gods = list(
-                _safe_call(eight_char, f"get{prefix}ShiShenZhi", [])
-            )
+            hidden = _safe_list(eight_char, f"get{prefix}HideGan")
+            hidden_ten_gods = _safe_list(eight_char, f"get{prefix}ShiShenZhi")
             hidden_items = [
                 {
                     "stem": str(stem),
@@ -239,24 +237,14 @@ class LunarPythonAdapter(CalendarAdapter):
                     "ganzhi": pillar.ganzhi,
                     "stem": pillar.stem.char,
                     "branch": pillar.branch.char,
-                    "major_star": str(
-                        _safe_call(eight_char, f"get{prefix}ShiShenGan", "")
-                    ),
+                    "major_star": str(_safe_call(eight_char, f"get{prefix}ShiShenGan", "")),
                     "hidden_stems": hidden_items,
-                    "secondary_stars": [item["ten_god"] for item in hidden_items],
-                    "growth_stage": str(
-                        _safe_call(eight_char, f"get{prefix}DiShi", "")
-                    ),
+                    "secondary_stars": [str(item["ten_god"]) for item in hidden_items],
+                    "growth_stage": str(_safe_call(eight_char, f"get{prefix}DiShi", "")),
                     "self_seat": _self_seat(pillar.stem, pillar.branch),
-                    "void": str(
-                        _safe_call(eight_char, f"get{prefix}XunKong", "")
-                    ),
-                    "nayin": str(
-                        _safe_call(eight_char, f"get{prefix}NaYin", pillar.nayin)
-                    ),
-                    "five_elements": str(
-                        _safe_call(eight_char, f"get{prefix}WuXing", "")
-                    ),
+                    "void": str(_safe_call(eight_char, f"get{prefix}XunKong", "")),
+                    "nayin": str(_safe_call(eight_char, f"get{prefix}NaYin", pillar.nayin)),
+                    "five_elements": str(_safe_call(eight_char, f"get{prefix}WuXing", "")),
                     "shensha": sorted(
                         {hit.name for hit in hits if hit.target == pillar.branch.char}
                     ),
