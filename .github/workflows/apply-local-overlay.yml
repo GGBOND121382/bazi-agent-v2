@@ -5,6 +5,7 @@ on:
     branches: [agent/mobile-ui-deterministic-chat]
     paths:
       - '.github/workflows/apply-local-overlay.yml'
+  workflow_dispatch:
 
 permissions:
   contents: write
