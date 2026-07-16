@@ -56,6 +56,19 @@ const detailByPosition = computed<Record<string, DeterministicPillarDetail>>(() 
   return Object.fromEntries(items.map((item) => [item.position, item]))
 })
 const fiveElements = computed(() => details.value?.five_elements ?? overview.value?.five_elements ?? [])
+const birthplaceText = computed(() => {
+  const value = basic.value.birthplace
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '—'
+  const place = value as Record<string, unknown>
+  const names = [place.province, place.city].map(String).filter((item) => item && item !== 'undefined')
+  const longitude = typeof place.longitude === 'number' ? `东经${place.longitude.toFixed(2)}°` : ''
+  const latitude = typeof place.latitude === 'number' ? `北纬${place.latitude.toFixed(2)}°` : ''
+  return [...new Set(names), latitude, longitude].filter(Boolean).join('　') || '—'
+})
+const voidSummary = computed(() => {
+  const values = [detailByPosition.value.year?.void, detailByPosition.value.day?.void].filter(Boolean)
+  return [...new Set(values)].join('　') || '—'
+})
 
 const apiErrorMessage = computed(() => {
   if (error.value instanceof ApiError) return `${error.value.detail.error_code}: ${error.value.detail.message_key}`
@@ -126,11 +139,15 @@ async function startAnalysis() {
       <section id="basic-info" class="info-panel card-surface">
         <div class="info-row"><span>公历</span><strong>{{ textValue('solar_datetime') }}</strong></div>
         <div class="info-row"><span>农历</span><strong>{{ textValue('lunar_date') }}</strong></div>
+        <div class="info-row"><span>真太阳时</span><strong>{{ textValue('true_solar_time') }}</strong></div>
+        <div class="info-row"><span>出生地区</span><strong>{{ birthplaceText }}</strong></div>
+        <div class="info-row"><span>人元司令分野</span><strong>{{ textValue('ren_yuan_commander') }}</strong></div>
         <div class="info-row"><span>出生节气</span><strong>{{ textValue('birth_solar_terms') }}</strong></div>
         <div class="info-pair"><div><span>生肖</span><strong>{{ textValue('zodiac') }}</strong></div><div><span>星座</span><strong>{{ textValue('western_zodiac') }}</strong></div></div>
-        <div class="info-pair"><div><span>胎元</span><strong>{{ textValue('tai_yuan') }} {{ textValue('tai_yuan_nayin') }}</strong></div><div><span>胎息</span><strong>{{ textValue('tai_xi') }} {{ textValue('tai_xi_nayin') }}</strong></div></div>
-        <div class="info-pair"><div><span>命宫</span><strong>{{ textValue('ming_gong') }} {{ textValue('ming_gong_nayin') }}</strong></div><div><span>身宫</span><strong>{{ textValue('shen_gong') }} {{ textValue('shen_gong_nayin') }}</strong></div></div>
-        <div class="info-row"><span>人元司令分野</span><strong>{{ textValue('ren_yuan_commander') }}</strong></div>
+        <div class="info-pair"><div><span>星宿</span><strong>{{ textValue('lunar_mansion') }}</strong></div><div><span>命卦</span><strong>{{ textValue('ming_gua') }}</strong></div></div>
+        <div class="info-pair"><div><span>胎元</span><strong>{{ textValue('tai_yuan') }} {{ textValue('tai_yuan_nayin') }}</strong></div><div><span>空亡</span><strong>{{ voidSummary }}</strong></div></div>
+        <div class="info-pair"><div><span>命宫</span><strong>{{ textValue('ming_gong') }} {{ textValue('ming_gong_nayin') }}</strong></div><div><span>胎息</span><strong>{{ textValue('tai_xi') }} {{ textValue('tai_xi_nayin') }}</strong></div></div>
+        <div class="info-row"><span>身宫</span><strong>{{ textValue('shen_gong') }} {{ textValue('shen_gong_nayin') }}</strong></div>
       </section>
 
       <section id="basic-chart" class="pillar-panel card-surface" aria-label="四柱排盘">
@@ -141,6 +158,7 @@ async function startAnalysis() {
         <div class="pillar-grid gan-row"><span>天干</span><strong v-for="position in positionOrder" :key="position" :class="stemClass[detail(position)?.stem || overview.pillars.find((item) => item.position === position)?.stem || '']">{{ detail(position)?.stem || overview.pillars.find((item) => item.position === position)?.stem }}</strong></div>
         <div class="pillar-grid zhi-row"><span>地支</span><strong v-for="position in positionOrder" :key="position" :class="branchClass[detail(position)?.branch || overview.pillars.find((item) => item.position === position)?.branch || '']">{{ detail(position)?.branch || overview.pillars.find((item) => item.position === position)?.branch }}</strong></div>
         <div class="pillar-grid multi-row"><span>藏干</span><div v-for="position in positionOrder" :key="position"><span v-for="item in detail(position)?.hidden_stems || overview.pillars.find((p) => p.position === position)?.hidden_stems || []" :key="item.stem">{{ item.stem }}<small>{{ item.ten_god }}</small></span></div></div>
+        <div class="pillar-grid multi-row"><span>副星</span><div v-for="position in positionOrder" :key="position"><span v-for="item in detail(position)?.secondary_stars || []" :key="item">{{ item }}</span><span v-if="!detail(position)?.secondary_stars?.length">—</span></div></div>
         <div class="pillar-grid"><span>星运</span><strong v-for="position in positionOrder" :key="position">{{ detail(position)?.growth_stage || overview.pillars.find((item) => item.position === position)?.growth_stage || '—' }}</strong></div>
         <div class="pillar-grid"><span>自坐</span><strong v-for="position in positionOrder" :key="position">{{ detail(position)?.self_seat || '—' }}</strong></div>
         <div class="pillar-grid"><span>空亡</span><strong v-for="position in positionOrder" :key="position">{{ detail(position)?.void || '—' }}</strong></div>
