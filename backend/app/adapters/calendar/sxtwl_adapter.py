@@ -9,10 +9,6 @@ from __future__ import annotations
 import time as _time
 from datetime import datetime
 from functools import lru_cache
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:  # pragma: no cover
-    import sxtwl
 
 from ...domain.chart import EngineVersion, Fact
 from ...domain.pillars import Branch, FourPillars, Pillar, Stem
@@ -58,8 +54,8 @@ class SxtwlAdapter(CalendarAdapter):
         gz_year = day_obj.getYearGZ()
         gz_month = day_obj.getMonthGZ()
         gz_day = day_obj.getDayGZ()
-        # sxtwl.getHourGZ accepts a normal 0–23 wall-clock hour. Passing a
-        # pre-computed 0–11 branch index shifts the result and creates false
+        # sxtwl.getHourGZ accepts a normal 0-23 wall-clock hour. Passing a
+        # pre-computed 0-11 branch index shifts the result and creates false
         # cross-engine conflicts on platforms where sxtwl is installed.
         gz_hour = day_obj.getHourGZ(calculation_time.hour)
 
