@@ -1,8 +1,7 @@
-"""Chart service — orchestrates the B1/B2 calculation with storage and time normalization.
+"""Chart service — orchestrates deterministic calculation with storage and time normalization.
 
 This is the single point where a BirthRequest becomes a StoredChart. All API
-routes for `/v1/charts` go through here. RAG/LLM never call this; they only
-read stored charts.
+routes for `/v1/charts` go through here. RAG/LLM only read stored chart facts.
 """
 from __future__ import annotations
 
@@ -25,6 +24,45 @@ from .viewmodel_mapper import to_chart_result_dto
 
 logger = logging.getLogger(__name__)
 
+_KUA = {
+    1: ("坎卦", "东四命"),
+    2: ("坤卦", "西四命"),
+    3: ("震卦", "东四命"),
+    4: ("巽卦", "东四命"),
+    6: ("乾卦", "西四命"),
+    7: ("兑卦", "西四命"),
+    8: ("艮卦", "西四命"),
+    9: ("离卦", "东四命"),
+}
+
+
+def _digit_root(value: int) -> int:
+    result = abs(value)
+    while result > 9:
+        result = sum(int(char) for char in str(result))
+    return result or 9
+
+
+def _kua_number(year: int, gender: str) -> int:
+    seed = _digit_root(year % 100)
+    if year >= 2000:
+        number = _digit_root(9 - seed) if gender == "male" else _digit_root(seed + 6)
+    else:
+        number = _digit_root(10 - seed) if gender == "male" else _digit_root(seed + 5)
+    if number == 5:
+        return 2 if gender == "male" else 8
+    return number
+
+
+def _ming_gua(year: int, gender: str) -> str:
+    def label(resolved_gender: str) -> str:
+        name, group = _KUA[_kua_number(year, resolved_gender)]
+        return f"{name}（{group}）"
+
+    if gender in {"male", "female"}:
+        return label(gender)
+    return f"男命：{label('male')}；女命：{label('female')}"
+
 
 class ChartService:
     def __init__(
@@ -45,12 +83,10 @@ class ChartService:
         profile: CalculationProfile | None = None,
     ) -> tuple[ChartResultDTO, str, bool]:
         """Idempotent create. Returns (dto, chart_id, created_now)."""
-        # Idempotency: return existing chart if the key was used before.
         existing = self.store.find_by_idempotency_key(idempotency_key)
         if existing:
             return to_chart_result_dto(existing.chart), existing.chart_id, False
 
-        # Validate profile_id
         profile = profile or load_profile()
         if request.calculation_profile_id != profile.profile_id:
             raise ProfileError(
@@ -58,35 +94,49 @@ class ChartService:
                 safe_details={"active": profile.profile_id, "requested": request.calculation_profile_id},
             )
 
-        # Normalize time → UTC for deterministic calculation
         nt = self._normalize_time(request, profile)
-
-        # Run deterministic calculation
         chart_id = chart_id or f"chart_{uuid.uuid4().hex[:12]}"
-        result: ChartResult = calculate_chart_from_normalized(
+        calculated = calculate_chart_from_normalized(
             nt=nt,
             profile=profile,
             deps=self.deps,
             chart_id=chart_id,
             gender=request.gender,
         )
-        # Override the result's chart_id in case calculate generated a new one
+
+        details = dict(calculated.details)
+        basic_source = details.get("basic")
+        basic = dict(basic_source) if isinstance(basic_source, dict) else {}
+        basic.update(
+            {
+                "gender": request.gender,
+                "birth_datetime_local": request.birth_datetime_local.isoformat(),
+                "timezone": request.timezone,
+                "time_precision": request.time_precision,
+                "time_basis": calculated.time_basis,
+                "true_solar_time": calculated.calculation_time.isoformat(),
+                "birthplace": request.birthplace.model_dump(exclude_none=True),
+                "ming_gua": _ming_gua(request.birth_datetime_local.year, request.gender),
+            }
+        )
+        details["basic"] = basic
+
         result = ChartResult(
             chart_id=chart_id,
-            calculation_status=result.calculation_status,
-            calculation_profile_id=result.calculation_profile_id,
-            normalized_utc=result.normalized_utc,
-            calculation_time=result.calculation_time,
-            time_basis=result.time_basis,
-            pillars=result.pillars,
-            facts=result.facts,
-            engine_versions=result.engine_versions,
-            warnings=result.warnings,
-            qiyun=result.qiyun,
-            dayun=result.dayun,
+            calculation_status=calculated.calculation_status,
+            calculation_profile_id=calculated.calculation_profile_id,
+            normalized_utc=calculated.normalized_utc,
+            calculation_time=calculated.calculation_time,
+            time_basis=calculated.time_basis,
+            pillars=calculated.pillars,
+            facts=calculated.facts,
+            engine_versions=calculated.engine_versions,
+            warnings=calculated.warnings,
+            qiyun=calculated.qiyun,
+            dayun=calculated.dayun,
+            details=details,
         )
 
-        # Persist
         self.store.save(result)
         self.store.remember_idempotency_key(idempotency_key, chart_id)
         return to_chart_result_dto(result), chart_id, True
@@ -178,9 +228,6 @@ class ChartService:
 
     @staticmethod
     def _normalize_time(request: BirthRequest, profile: CalculationProfile) -> NormalizedTime:
-        # If the request's birth_datetime_local is naive, attach the requested
-        # timezone before normalizing. (The schema accepts both naive + IANA
-        # name and offset-aware; we collapse to the latter before normalize().)
         from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
         from ..domain.errors import TimeError
