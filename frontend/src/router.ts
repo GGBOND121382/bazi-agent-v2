@@ -3,6 +3,7 @@ import LandingPage from '@/pages/LandingPage.vue'
 import ChartNewWizard from '@/pages/ChartNewWizard.vue'
 import ChartOverviewPage from '@/pages/ChartOverviewPage.vue'
 import TemporalPage from '@/pages/TemporalPage.vue'
+import ChatPage from '@/pages/ChatPage.vue'
 import ReportReadPage from '@/pages/ReportReadPage.vue'
 import AnalysisProgressPage from '@/pages/AnalysisProgressPage.vue'
 import HistoryPage from '@/pages/HistoryPage.vue'
@@ -11,15 +12,16 @@ import SettingsPage from '@/pages/SettingsPage.vue'
 export default createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', name: 'home', component: LandingPage },
-    { path: '/charts/new', name: 'chart-new', component: ChartNewWizard },
-    { path: '/charts/:chartId', name: 'chart-overview', component: ChartOverviewPage, props: true },
-    { path: '/charts/:chartId/temporal', name: 'temporal', component: TemporalPage, props: true },
-    { path: '/reports/:reportId', name: 'report-read', component: ReportReadPage, props: true },
-    { path: '/reports/:reportId/print', name: 'report-print', component: ReportReadPage, props: (route) => ({ reportId: route.params.reportId, printMode: true }) },
-    { path: '/jobs/:jobId', name: 'analysis-progress', component: AnalysisProgressPage, props: true },
-    { path: '/history', name: 'history', component: HistoryPage },
-    { path: '/settings', name: 'settings', component: SettingsPage },
+    { path: '/', name: 'home', component: LandingPage, meta: { title: '首页排盘' } },
+    { path: '/charts/new', name: 'chart-new', component: ChartNewWizard, meta: { title: '新建命盘' } },
+    { path: '/charts/:chartId', name: 'chart-overview', component: ChartOverviewPage, props: true, meta: { title: '基本排盘' } },
+    { path: '/charts/:chartId/temporal', name: 'temporal', component: TemporalPage, props: true, meta: { title: '流运排盘' } },
+    { path: '/charts/:chartId/chat', name: 'chart-chat', component: ChatPage, props: true, meta: { title: '运势问答' } },
+    { path: '/reports/:reportId', name: 'report-read', component: ReportReadPage, props: true, meta: { title: '命理分析' } },
+    { path: '/reports/:reportId/print', name: 'report-print', component: ReportReadPage, props: (route) => ({ reportId: route.params.reportId, printMode: true }), meta: { title: '分析报告' } },
+    { path: '/jobs/:jobId', name: 'analysis-progress', component: AnalysisProgressPage, props: true, meta: { title: '生成分析' } },
+    { path: '/history', name: 'history', component: HistoryPage, meta: { title: '用户列表' } },
+    { path: '/settings', name: 'settings', component: SettingsPage, meta: { title: '设置' } },
   ],
   scrollBehavior(to) {
     if (to.hash) return { el: to.hash, behavior: 'smooth' }
