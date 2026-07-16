@@ -1,10 +1,11 @@
-"""I2 analysis jobs, SSE replay, cancellation, analyses, and report reads."""
+"""Analysis jobs, follow-up chat, SSE replay, cancellation, and report reads."""
 from __future__ import annotations
 
 import json
 import time
 from collections.abc import Iterator
-from typing import Annotated
+from datetime import date
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, Query, status
 from fastapi.responses import StreamingResponse
@@ -13,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ...domain.errors import InvalidInputError
 from ...jobs import AnalysisJobService, JobStateError, get_default_analysis_service
 from ...jobs.state import TERMINAL_STAGES
+from ...services.chat import FortuneChatService, get_default_chat_service
 from ..dto import ReportViewDTO, StructuredAnalysisDTO
 
 router = APIRouter(prefix="/api/v1", tags=["analyses"])
@@ -24,8 +26,27 @@ class AnalysisStartRequest(BaseModel):
     school: str = "engineering_policy"
 
 
+class ChatTurn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class FortuneChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(min_length=1, max_length=2000)
+    scope: Literal["general", "year", "month", "day"] = "general"
+    target_date: date = Field(default_factory=date.today)
+    history: list[ChatTurn] = Field(default_factory=list, max_length=20)
+    school: str = "engineering_policy"
+
+
 def _analysis_service() -> AnalysisJobService:
     return get_default_analysis_service()
+
+
+def _chat_service() -> FortuneChatService:
+    return get_default_chat_service()
 
 
 @router.post("/charts/{chart_id}/analyses", status_code=status.HTTP_202_ACCEPTED)
@@ -45,6 +66,26 @@ def start_analysis(
     except JobStateError as exc:
         raise InvalidInputError(str(exc)) from exc
     return job.public_dict()
+
+
+@router.post("/charts/{chart_id}/chat")
+def chat_about_chart(
+    chart_id: str,
+    request: FortuneChatRequest,
+    service: FortuneChatService = Depends(_chat_service),
+) -> dict[str, object]:
+    """Answer chart-aware general/year/month/day fortune questions synchronously."""
+    try:
+        return service.answer(
+            chart_id=chart_id,
+            question=request.question,
+            scope=request.scope,
+            target_date=request.target_date,
+            history=tuple(item.model_dump() for item in request.history),
+            school=request.school,
+        )
+    except ValueError as exc:
+        raise InvalidInputError(str(exc)) from exc
 
 
 @router.get("/jobs/{job_id}")
