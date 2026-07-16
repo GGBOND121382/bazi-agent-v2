@@ -81,8 +81,17 @@
   color: #6d5525;
 }
 
-/* Keyboard users receive a visible affordance on horizontally scrollable charts. */
-.pillar-panel:focus-visible {
-  outline: 3px solid rgba(109, 85, 37, .45);
-  outline-offset: 3px;
+/* Keep the screenshot-style four-column chart fully visible on phone widths. */
+@media (max-width: 720px) {
+  .pillar-panel { overflow-x: hidden; }
+  .pillar-grid {
+    min-width: 0;
+    grid-template-columns: 52px repeat(4, minmax(0, 1fr));
+  }
+  .pillar-grid > span:first-child { padding: 9px 6px; font-size: .76rem; }
+  .pillar-grid > strong,
+  .pillar-grid > div { min-width: 0; padding: 9px 4px; font-size: .84rem; overflow-wrap: anywhere; }
+  .gan-row strong,
+  .zhi-row strong { font-size: 1.95rem; }
+  .multi-row > div > span { grid-template-columns: 1fr; gap: 1px; }
 }
