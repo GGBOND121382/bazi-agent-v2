@@ -15,7 +15,7 @@ from lunar_python import Solar
 
 from ...domain.chart import EngineVersion, Fact
 from ...domain.pillars import Branch, FourPillars, Pillar, Stem
-from ...domain.rules import evaluate_shensha
+from ...domain.rules.shensha import evaluate_shensha
 from .base import CalendarAdapter, CalendarResult
 
 _ELEMENT_ZH = {
@@ -71,7 +71,9 @@ def _safe_list(obj: Any, method: str) -> list[object]:
     return list(value) if isinstance(value, (list, tuple)) else []
 
 
-def _solar_to_datetime(value: Any, zone: tzinfo) -> datetime:
+def _solar_to_datetime(value: Any, zone: tzinfo | None) -> datetime:
+    if zone is None:
+        raise ValueError("calendar conversion requires timezone-aware input")
     return datetime(
         int(value.getYear()),
         int(value.getMonth()),
