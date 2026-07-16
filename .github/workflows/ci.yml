@@ -25,12 +25,12 @@ jobs:
       - name: Ruff
         working-directory: backend
         run: python -m ruff check app tests
-      - name: Mypy
-        working-directory: backend
-        run: python -m mypy app
       - name: Pytest
         working-directory: backend
-        run: python -m pytest -q
+        run: set -o pipefail; python -m pytest -q 2>&1 | tail -n 100
+      - name: Mypy
+        working-directory: backend
+        run: set -o pipefail; python -m mypy app 2>&1 | tail -n 100
 
   frontend:
     runs-on: ubuntu-latest
@@ -48,9 +48,9 @@ jobs:
       - name: Typecheck
         working-directory: frontend
         run: npm run typecheck
-      - name: Unit tests
-        working-directory: frontend
-        run: npm test
       - name: Production build
         working-directory: frontend
         run: npm run build
+      - name: Unit tests
+        working-directory: frontend
+        run: set -o pipefail; npm test 2>&1 | tail -n 100
