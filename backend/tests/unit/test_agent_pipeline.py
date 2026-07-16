@@ -72,7 +72,7 @@ def _analysis(**claim_overrides: Any) -> StructuredAnalysisDTO:
         chart_id="chart_test",
         school="engineering_policy",
         claims=[claim],
-        limitations=["传统文化解释存在不确定性。"],
+        limitations=[],
     )
 
 
@@ -145,7 +145,7 @@ def test_verifier_rejects_hallucinated_ids_and_high_risk_assertions() -> None:
 
 
 @pytest.mark.rag
-def test_verifier_rejects_c_tier_case_as_rule_and_requires_case_qualifier() -> None:
+def test_verifier_rejects_c_tier_case_as_authoritative_rule() -> None:
     case = RetrievedEvidence(
         chunk_id="CASE-C-1",
         source_id="case-source",
@@ -168,7 +168,8 @@ def test_verifier_rejects_c_tier_case_as_rule_and_requires_case_qualifier() -> N
         configured_school="engineering_policy",
     )
     codes = {error["code"] for error in result.errors}
-    assert {"NON_AUTHORITATIVE_RULE", "CASE_ANALOGY_NOT_QUALIFIED"} <= codes
+    assert "NON_AUTHORITATIVE_RULE" in codes
+    assert "CASE_ANALOGY_NOT_QUALIFIED" not in codes
 
 
 @pytest.mark.rag
@@ -260,7 +261,7 @@ def test_pipeline_salvages_only_claims_that_pass_the_deterministic_gate() -> Non
     assert result.validation.status == "passed"
     assert result.report is not None
     assert [claim.claim_id for claim in result.analysis.claims] == ["CLAIM-1"]
-    assert any("已排除 1 条" in item for item in result.analysis.limitations)
+    assert not any("已排除" in item for item in result.analysis.limitations)
     report_claim_ids = {
         block["claim_id"]
         for section in result.report["sections"]
