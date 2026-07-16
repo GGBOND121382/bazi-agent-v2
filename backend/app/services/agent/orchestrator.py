@@ -1,4 +1,4 @@
-"""A2 synchronous core. I2 wraps this in a cancellable job/SSE surface."""
+"""A2 synchronous analysis core. I2 wraps this in a cancellable job/SSE surface."""
 from __future__ import annotations
 
 import json
@@ -33,16 +33,13 @@ _RELATION_LABELS = {
 }
 
 _REVISION_GUIDANCE = {
-    "UNKNOWN_FACT": "fact_ids 只能使用输入 chart_facts 或 computed_relations 中逐字一致的 fact_id；删除任何自行编造的 id。",
-    "UNKNOWN_RULE": "rule_ids 只能使用输入 chart_facts、computed_relations 或 A/B 级 authoritative_evidence 中逐字一致的 rule_id/evidence_id。",
-    "UNKNOWN_EVIDENCE": "evidence_ids 只能使用 retrieved_evidence 中逐字一致的 evidence_id；无可用证据时删除该 claim。",
-    "ASSERTION_TOO_DETERMINISTIC": "每个 claim.statement 必须包含原文短语“在本规则体系下”或“传统命理”。",
-    "FACTUAL_TOKEN_MISMATCH": "删除未被所引 fact_id、computed_relations 或 A/B rule_id 明确支持的干支字符。",
-    "MISSING_INTERPRETIVE_SUPPORT": "每个 claim 至少引用一个有效 rule_id 或 evidence_id；没有依据的结论必须删除。",
-    "NON_AUTHORITATIVE_RULE": "C 级材料只能放入 evidence_ids；rule_ids 只能使用命盘/关系规则或 A/B 级 chunk id。",
-    "CASE_ANALOGY_NOT_QUALIFIED": "引用历史案例时明确写出“历史案例仅作类比，不代表当前用户必然发生同类结果”。",
-    "CLAIM_SCHOOL_MISMATCH": "claim.school 必须与 analysis_profile.school 一致，或省略 claim.school。",
-    "POLICY_HIGH_RISK_ASSERTION": "删除医疗、法律、投资等高风险确定性结论；不能通过改写为婉转表达来保留该结论。",
+    "UNKNOWN_FACT": "fact_ids 只能使用输入 chart_facts 或 computed_relations 中存在的 fact_id。",
+    "UNKNOWN_RULE": "rule_ids 只能使用命盘规则、关系规则或 A/B 级 authoritative_evidence 的 ID。",
+    "UNKNOWN_EVIDENCE": "evidence_ids 只能使用 retrieved_evidence 中存在的 evidence_id。",
+    "MISSING_INTERPRETIVE_SUPPORT": "为该判断补充有效 rule_id 或 evidence_id；没有依据时删除该 claim。",
+    "NON_AUTHORITATIVE_RULE": "C 级资料放入 evidence_ids，不要放入 rule_ids。",
+    "CLAIM_SCHOOL_MISMATCH": "claim.school 与 analysis_profile.school 保持一致，或省略该字段。",
+    "POLICY_HIGH_RISK_ASSERTION": "改写为趋势、条件与风险提示，不得保证具体高风险事件。",
 }
 
 
@@ -55,11 +52,10 @@ def _salvage_valid_claims(
     configured_school: str,
     computed_relations: list[dict[str, Any]],
 ) -> tuple[StructuredAnalysisDTO, ValidationResultDTO]:
-    """Drop only claim-scoped failures, then re-run the full deterministic gate.
+    """Drop claim-scoped identifier failures and re-run the deterministic gate.
 
-    Global validation failures are never recoverable here. An empty analysis is
-    also rejected, so this cannot turn a wholly invalid model response into a
-    formal report.
+    The cleanup is intentionally invisible in the user-facing report: validation
+    diagnostics belong to logs/telemetry, not to the命理解读正文。
     """
     if validation.status == "passed":
         return analysis, validation
@@ -75,16 +71,7 @@ def _salvage_valid_claims(
     ]
     if not rejected_claim_ids or not remaining_claims:
         return analysis, validation
-    codes = ", ".join(validation.required_revisions)
-    salvaged = analysis.model_copy(
-        update={
-            "claims": remaining_claims,
-            "limitations": [
-                *analysis.limitations,
-                f"已排除 {len(rejected_claim_ids)} 条未通过确定性校验的解释（{codes}）。",
-            ],
-        }
-    )
+    salvaged = analysis.model_copy(update={"claims": remaining_claims})
     salvaged_validation = verify_analysis(
         chart=chart,
         evidence=evidence,
@@ -165,16 +152,20 @@ class AnalysisPipeline:
             str(relation["support_query"]) for relation in computed_relations
         )
         chart_queries = stem_queries + branch_queries + relation_queries
-        # Chart-derived terms come first so a long focus list cannot crowd the
-        # authoritative A/B lookup out of the bounded FTS expression.
-        plan = RetrievalPlan(queries=chart_queries + user_focus, school=school, top_k=8)
+        plan = RetrievalPlan(queries=chart_queries + user_focus, school=school, top_k=12)
         if on_stage:
             on_stage("retrieving")
         evidence = self.retriever.retrieve(plan)
         if not evidence:
             raise AnalysisPipelineError("approved evidence is required")
-        schema_path = Path(__file__).resolve().parents[4] / "contracts" / "schemas" / "analysis_output.schema.json"
+        schema_path = (
+            Path(__file__).resolve().parents[4]
+            / "contracts"
+            / "schemas"
+            / "analysis_output.schema.json"
+        )
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
         def serialize_evidence(item: RetrievedEvidence) -> dict[str, Any]:
             return {
                 "evidence_id": item.chunk_id,
@@ -198,25 +189,25 @@ class AnalysisPipeline:
             for channel in RetrievalChannel
         }
         grouped_evidence["conflicting_evidence"] = []
+        deterministic_details = chart.calendar.get("deterministic_details", {})
         input_payload: dict[str, Any] = {
-                "chart_id": chart.chart_id,
-                "calculation_profile_id": chart.calculation_profile_id,
-                "chart_facts": [fact.model_dump(mode="json") for fact in chart.facts],
-                "chart_structure": [
-                    pillar.model_dump(mode="json") for pillar in chart.pillars
-                ],
-                "computed_relations": computed_relations,
-                "retrieved_evidence": [serialize_evidence(item) for item in evidence],
-                "retrieval_context": grouped_evidence,
-                "retrieval_policy": {
-                    "deterministic_engine_overrides_rag": True,
-                    "rule_claims_require_trust_tier": ["A", "B"],
-                    "c_tier_is_explanation_or_historical_analogy_only": True,
-                    "every_claim_requires_rule_or_evidence": True,
-                    "required_statement_qualifier": "在本规则体系下",
-                },
-                "analysis_profile": {"school": school},
-                "user_focus": list(user_focus),
+            "chart_id": chart.chart_id,
+            "calculation_profile_id": chart.calculation_profile_id,
+            "chart_facts": [fact.model_dump(mode="json") for fact in chart.facts],
+            "chart_structure": [pillar.model_dump(mode="json") for pillar in chart.pillars],
+            "deterministic_details": deterministic_details,
+            "computed_relations": computed_relations,
+            "retrieved_evidence": [serialize_evidence(item) for item in evidence],
+            "retrieval_context": grouped_evidence,
+            "retrieval_policy": {
+                "deterministic_engine_overrides_rag": True,
+                "rule_claims_require_trust_tier": ["A", "B"],
+                "c_tier_is_explanation_or_historical_analogy_only": True,
+                "every_claim_requires_rule_or_evidence": True,
+                "interpretive_judgments_are_allowed": True,
+            },
+            "analysis_profile": {"school": school},
+            "user_focus": list(user_focus),
         }
         response: ProviderResponse | None = None
         analysis: StructuredAnalysisDTO | None = None
