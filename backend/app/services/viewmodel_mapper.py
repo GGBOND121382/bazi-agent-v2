@@ -1,10 +1,7 @@
-"""Domain ChartResult → ChartResultDTO mapper.
-
-The mapper is the only place where domain objects become wire-format DTOs.
-Any change to this file should be matched by a corresponding update in
-contracts/schemas/json_schema/chart_result.schema.json (or its view schemas).
-"""
+"""Domain ChartResult → API/view-model DTO mappers."""
 from __future__ import annotations
+
+from typing import Any, cast
 
 from ..api.dto import (
     ChartOverviewViewDTO,
@@ -16,6 +13,17 @@ from ..api.dto import (
     WarningDTO,
 )
 from ..domain.chart import ChartResult
+from ..domain.rules import evaluate_relations
+
+_RELATION_LABELS = {
+    "six_combination": "六合",
+    "three_combination": "三合",
+    "three_meeting": "三会",
+    "clash": "六冲",
+    "harm": "六害",
+    "break": "相破",
+    "punishment": "相刑",
+}
 
 
 def to_chart_result_dto(result: ChartResult) -> ChartResultDTO:
@@ -46,6 +54,7 @@ def to_chart_result_dto(result: ChartResult) -> ChartResultDTO:
                 {"engine": e.engine, "version": e.version, "took_ms": e.took_ms}
                 for e in result.engine_versions
             ],
+            "deterministic_details": result.details,
         },
         pillars=pillars,
         day_master=result.day_master,
@@ -71,23 +80,52 @@ def to_chart_result_dto(result: ChartResult) -> ChartResultDTO:
     )
 
 
+def _detail_pillars(result: ChartResult) -> dict[str, dict[str, Any]]:
+    raw = result.details.get("pillars")
+    if not isinstance(raw, list):
+        return {}
+    return {
+        str(item.get("position")): cast(dict[str, Any], item)
+        for item in raw
+        if isinstance(item, dict) and item.get("position")
+    }
+
+
 def to_chart_overview_view_dto(result: ChartResult) -> ChartOverviewViewDTO:
     fact_ids_by_value: dict[str, list[str]] = {}
     for fact in result.facts:
         fact_ids_by_value.setdefault(str(fact.value), []).append(fact.fact_id)
-    pillars = [
-        PillarViewDTO(
-            position=p["position"],
-            stem=p["stem"],
-            branch=p["branch"],
-            ten_god=p.get("ten_god_of_stem"),
-            hidden_stems=p.get("hidden_stems") or [],
-            nayin=p.get("nayin"),
-            growth_stage=None,
-            fact_ids=fact_ids_by_value.get(p["ganzhi"], []),
+    detail_by_position = _detail_pillars(result)
+    pillars = []
+    for p in result.pillar_dicts():
+        detail = detail_by_position.get(str(p["position"]), {})
+        pillars.append(
+            PillarViewDTO(
+                position=p["position"],
+                stem=p["stem"],
+                branch=p["branch"],
+                ten_god=str(detail.get("major_star") or p.get("ten_god_of_stem") or "") or None,
+                hidden_stems=cast(list[dict[str, Any]], detail.get("hidden_stems") or p.get("hidden_stems") or []),
+                nayin=str(detail.get("nayin") or p.get("nayin") or "") or None,
+                growth_stage=str(detail.get("growth_stage") or "") or None,
+                fact_ids=fact_ids_by_value.get(p["ganzhi"], []),
+            )
         )
-        for p in result.pillar_dicts()
+    relationships = [
+        {
+            "type": relation.type,
+            "label": _RELATION_LABELS.get(relation.type, relation.type),
+            "participants": list(relation.branches),
+            "rule_id": relation.rule_id,
+        }
+        for relation in evaluate_relations(result.pillars)
     ]
+    five_elements_raw = result.details.get("five_elements")
+    five_elements = (
+        cast(list[dict[str, Any]], five_elements_raw)
+        if isinstance(five_elements_raw, list)
+        else []
+    )
     return ChartOverviewViewDTO(
         chart_id=result.chart_id,
         display_name="命盘",
@@ -100,6 +138,6 @@ def to_chart_overview_view_dto(result: ChartResult) -> ChartOverviewViewDTO:
             {"label": "时间口径", "value": result.time_basis},
         ],
         warnings=[{"severity": item.severity, "message": item.message} for item in result.warnings],
-        relationships=[],
-        five_elements=[],
+        relationships=relationships,
+        five_elements=five_elements,
     )
