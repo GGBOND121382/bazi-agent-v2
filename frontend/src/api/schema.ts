@@ -1,21 +1,7 @@
-/**
- * Hand-mirrored TS types corresponding to contracts/schemas/json_schema/*.json
- * and contracts/openapi.yaml.
- *
- * If the schema files change, regenerate this file by running:
- *     npm run gen:api
- * (requires openapi-typescript + a reachable contracts/openapi.yaml).
- *
- * Until then, keep this file in sync with the schemas by hand. Contract
- * tests in backend assert the equivalent Pydantic models accept the same
- * JSON, so a frontend bug will surface as a runtime validation error, not a
- * silent shape mismatch.
- */
-
 export type BirthRequest = {
   schema_version: 'birth-request-v1'
   gender: 'male' | 'female' | 'unspecified'
-  birth_datetime_local: string // ISO 8601
+  birth_datetime_local: string
   timezone: string
   fold?: 0 | 1
   birthplace: {
@@ -62,13 +48,37 @@ export type WarningDTO = {
   message: string
 }
 
+export type DeterministicPillarDetail = {
+  position: 'year' | 'month' | 'day' | 'hour'
+  ganzhi: string
+  stem: string
+  branch: string
+  major_star?: string
+  hidden_stems?: { stem: string; ten_god?: string }[]
+  secondary_stars?: string[]
+  growth_stage?: string
+  self_seat?: string
+  void?: string
+  nayin?: string
+  five_elements?: string
+  shensha?: string[]
+}
+
+export type DeterministicDetails = {
+  basic?: Record<string, unknown>
+  pillars?: DeterministicPillarDetail[]
+  five_elements?: { element: string; explicit: number; hidden: number; total?: number }[]
+  shensha?: Record<string, unknown>[]
+  [key: string]: unknown
+}
+
 export type ChartResultDTO = {
   schema_version: 'chart-result-v1'
   chart_id: string
   calculation_status: 'passed' | 'needs_review' | 'ambiguous' | 'failed'
   calculation_profile_id: string
-  normalized_time: { utc?: string }
-  calendar: { engine_versions?: EngineVersionDTO[] }
+  normalized_time: { utc?: string; calculation_time?: string; time_basis?: string }
+  calendar: { engine_versions?: EngineVersionDTO[]; deterministic_details?: DeterministicDetails }
   pillars: PillarDTO[]
   day_master: string
   facts: FactDTO[]
@@ -99,7 +109,7 @@ export type ChartOverviewViewDTO = {
   assumptions: { label: string; value: string }[]
   warnings: { severity: string; message: string }[]
   relationships: { type: string; label: string; participants: string[]; rule_id: string }[]
-  five_elements?: { element: string; explicit: number; hidden: number }[]
+  five_elements?: { element: string; explicit: number; hidden: number; total?: number }[]
 }
 
 export type JobEventDTO = {
@@ -135,6 +145,33 @@ export type AnalysisJobDTO = {
   created_at: string
   result_ref?: string | null
   error_code?: string | null
+}
+
+export type ChatScope = 'general' | 'year' | 'month' | 'day'
+export type ChatTurnDTO = { role: 'user' | 'assistant'; content: string }
+export type FortuneChatRequestDTO = {
+  question: string
+  scope: ChatScope
+  target_date: string
+  history?: ChatTurnDTO[]
+  school?: string
+}
+export type FortuneChatSectionDTO = {
+  title: string
+  content: string
+  opportunities?: string[]
+  cautions?: string[]
+  timing?: string[]
+}
+export type FortuneChatResponseDTO = {
+  answer: string
+  sections: FortuneChatSectionDTO[]
+  citations: { evidence_id: string; title?: string; source_id?: string; locator?: string }[]
+  scope: ChatScope
+  target_date: string
+  deterministic_context: Record<string, unknown>
+  model_id: string
+  prompt_version: string
 }
 
 export type ApiErrorDTO = {
