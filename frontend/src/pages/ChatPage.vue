@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { useBaziClient } from '@/api'
 import type {
   ChatScope,
@@ -10,11 +11,27 @@ import type {
 
 const props = defineProps<{ chartId: string }>()
 const client = useBaziClient()
+const route = useRoute()
+const scopeOptions: { value: ChatScope; label: string }[] = [
+  { value: 'year', label: '年' },
+  { value: 'month', label: '月' },
+  { value: 'day', label: '日' },
+]
 
 function todayLocal(): string {
   const now = new Date()
   const offset = now.getTimezoneOffset() * 60_000
   return new Date(now.getTime() - offset).toISOString().slice(0, 10)
+}
+
+function initialScope(): ChatScope {
+  const value = String(route.query.scope ?? '')
+  return value === 'month' || value === 'day' || value === 'general' ? value : 'year'
+}
+
+function initialDate(): string {
+  const value = String(route.query.date ?? '')
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : todayLocal()
 }
 
 type ChatMessage = {
@@ -24,8 +41,8 @@ type ChatMessage = {
   citations?: FortuneChatResponseDTO['citations']
 }
 
-const scope = ref<ChatScope>('year')
-const targetDate = ref(todayLocal())
+const scope = ref<ChatScope>(initialScope())
+const targetDate = ref(initialDate())
 const question = ref('请结合原局、大运和流年，分析我今年的事业、财运与感情。')
 const sending = ref(false)
 const error = ref<string | null>(null)
@@ -100,9 +117,9 @@ async function send(preset?: string) {
 
     <div class="chat-controls card-surface">
       <div class="segmented-control" aria-label="分析时间范围">
-        <button v-for="item in ([['year', '年'], ['month', '月'], ['day', '日']] as const)"
-          :key="item[0]" type="button" :class="{ active: scope === item[0] }" @click="scope = item[0]">
-          {{ item[1] }}运
+        <button v-for="item in scopeOptions" :key="item.value" type="button"
+          :class="{ active: scope === item.value }" @click="scope = item.value">
+          {{ item.label }}运
         </button>
       </div>
       <label class="field-row">
