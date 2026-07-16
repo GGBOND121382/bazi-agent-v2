@@ -31,7 +31,7 @@ Playwright：desktop-chromium + mobile-chromium，18/18 passed
 DeepSeek 完整在线 E2E：此前已 passed（正式 RAG、validation、报告生成、key 未回显/落盘）
 ```
 
-最终自动化结果以 GitHub Actions CI run 39 与 PR #1 为准。
+最终自动化结果以 GitHub Actions CI run 41 与 PR #1 为准。
 
 ## 尚需部署环境完成
 
