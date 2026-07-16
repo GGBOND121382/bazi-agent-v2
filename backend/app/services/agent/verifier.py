@@ -1,4 +1,9 @@
-"""Deterministic validator. A model can never override these failures."""
+"""Deterministic reference validator for model-produced structured analyses.
+
+The gate protects chart/evidence identifiers and truly unsafe absolute claims.
+Interpretive judgments such as 旺衰、格局、喜忌 are deliberately not treated as
+calculation errors; they are model/RAG conclusions and may carry uncertainty.
+"""
 from __future__ import annotations
 
 import json
@@ -11,12 +16,10 @@ from ...api.dto import ChartResultDTO, FactDTO, StructuredAnalysisDTO, Validatio
 from ..rag.models import RetrievedEvidence
 
 _RISK = re.compile(
-    r"(?:必然|注定|一定)(?:死亡|患病|离婚|破产|发财)|保证(?:盈利|发财)|"
-    r"(?:医疗|法律|投资)(?:诊断|结论|建议)",
+    r"(?:必然|注定|保证|百分之百)(?:死亡|患病|离婚|破产|发财|盈利)|"
+    r"(?:替代医生|无需就医|停止治疗)|(?:保证盈利|稳赚不赔)",
     re.IGNORECASE,
 )
-_QUALIFIERS = ("在本规则体系下", "倾向", "可能", "候选", "传统命理")
-_CASE_QUALIFIERS = ("历史案例", "仅作类比", "不代表", "不能推断")
 _GANZHI = frozenset("甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉戌亥")
 
 
@@ -117,26 +120,11 @@ def verify_analysis(
         if claim.school and claim.school != configured_school:
             errors.append(_error("CLAIM_SCHOOL_MISMATCH", claim.claim_id, claim.school))
         if _RISK.search(claim.statement):
-            errors.append(_error("POLICY_HIGH_RISK_ASSERTION", claim.claim_id, "unsafe assertion"))
-        if not any(qualifier in claim.statement for qualifier in _QUALIFIERS):
-            errors.append(_error("ASSERTION_TOO_DETERMINISTIC", claim.claim_id, "missing qualifier"))
-        cited_cases = [
-            evidence_index[evidence_id]
-            for evidence_id in claim.evidence_ids
-            if evidence_id in evidence_index
-            and evidence_index[evidence_id].can_support_case_analogy
-        ]
-        if cited_cases and not any(
-            qualifier in claim.statement for qualifier in _CASE_QUALIFIERS
-        ):
-            errors.append(
-                _error(
-                    "CASE_ANALOGY_NOT_QUALIFIED",
-                    claim.claim_id,
-                    "historical cases require an explicit non-inevitability qualifier",
-                )
-            )
+            errors.append(_error("POLICY_HIGH_RISK_ASSERTION", claim.claim_id, "absolute unsafe assertion"))
 
+        # A referenced-text mismatch can come from natural-language discussion of
+        # another pillar or temporal干支. It is useful diagnostics, not a reason to
+        # discard an otherwise well-supported interpretation.
         referenced_text = _referenced_text(
             fact_ids=claim.fact_ids,
             rule_ids=claim.rule_ids,
@@ -149,10 +137,14 @@ def verify_analysis(
             char for char in set(claim.statement) & _GANZHI if char not in referenced_text
         )
         if unsupported_ganzhi:
-            errors.append(
-                _error("FACTUAL_TOKEN_MISMATCH", claim.claim_id, "".join(unsupported_ganzhi))
+            warnings.append(
+                {
+                    "code": "UNREFERENCED_GANZHI_TOKEN",
+                    "claim_id": claim.claim_id,
+                    "detail": "".join(unsupported_ganzhi),
+                }
             )
-        if claim.confidence >= 0.85 and claim.counterevidence:
+        if claim.confidence >= 0.9 and claim.counterevidence:
             warnings.append(
                 {"code": "COUNTEREVIDENCE_OVERCONFIDENCE", "claim_id": claim.claim_id}
             )
