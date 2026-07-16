@@ -26,11 +26,36 @@ jobs:
         working-directory: backend
         run: python -m ruff check app tests
       - name: Pytest
+        id: backend_tests
         working-directory: backend
-        run: set -o pipefail; python -m pytest -q 2>&1 | tail -n 100
+        shell: bash
+        run: |
+          set +e
+          python -m pytest -q > pytest.log 2>&1
+          status=$?
+          tail -n 120 pytest.log
+          exit $status
       - name: Mypy
+        id: backend_mypy
+        if: always()
         working-directory: backend
-        run: set -o pipefail; python -m mypy app 2>&1 | tail -n 100
+        shell: bash
+        run: |
+          set +e
+          python -m mypy app > mypy.log 2>&1
+          status=$?
+          tail -n 120 mypy.log
+          exit $status
+      - name: Upload backend diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-diagnostics
+          path: |
+            backend/pytest.log
+            backend/mypy.log
+          if-no-files-found: warn
+          retention-days: 3
 
   frontend:
     runs-on: ubuntu-latest
@@ -52,5 +77,20 @@ jobs:
         working-directory: frontend
         run: npm run build
       - name: Unit tests
+        id: frontend_tests
         working-directory: frontend
-        run: set -o pipefail; npm test 2>&1 | tail -n 100
+        shell: bash
+        run: |
+          set +e
+          npm test > vitest.log 2>&1
+          status=$?
+          tail -n 120 vitest.log
+          exit $status
+      - name: Upload frontend diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-diagnostics
+          path: frontend/vitest.log
+          if-no-files-found: error
+          retention-days: 3
