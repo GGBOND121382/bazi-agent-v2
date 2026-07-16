@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bazi Agent API
-  version: 0.2.0
+  version: 0.3.0
 servers:
   - url: /api
 paths:
@@ -50,6 +50,35 @@ paths:
           name: Idempotency-Key
           required: true
           schema: {type: string}
+  /v1/charts/{chart_id}/chat:
+    post:
+      summary: Ask a chart-aware general, annual, monthly or daily fortune question
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [question, scope, target_date]
+              properties:
+                question: {type: string, minLength: 1, maxLength: 2000}
+                scope: {enum: [general, year, month, day]}
+                target_date: {type: string, format: date}
+                history:
+                  type: array
+                  maxItems: 20
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [role, content]
+                    properties:
+                      role: {enum: [user, assistant]}
+                      content: {type: string, minLength: 1, maxLength: 4000}
+                school: {type: string, default: engineering_policy}
+      responses:
+        "200": {description: Chart-aware answer with structured sections, citations and deterministic temporal context}
+        "422": {description: Invalid chart, date or request}
   /v1/jobs/{job_id}:
     get:
       summary: Get current job snapshot
