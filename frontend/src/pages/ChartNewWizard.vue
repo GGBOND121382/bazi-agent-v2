@@ -45,6 +45,10 @@ function persistDraft() {
   localStorage.setItem('bazi:draft:birth', JSON.stringify(form.value))
 }
 
+function toggleAdvanced(event: Event) {
+  showAdvanced.value = (event.currentTarget as HTMLDetailsElement).open
+}
+
 function buildRequest(): BirthRequest {
   const request: BirthRequest = {
     schema_version: 'birth-request-v1',
@@ -133,7 +137,7 @@ async function submit() {
         <div><span>计算方式</span><strong>真太阳时校正 · 节气精确交接</strong></div>
       </div>
 
-      <details class="advanced-form" :open="showAdvanced" @toggle="showAdvanced = ($event.target as HTMLDetailsElement).open">
+      <details class="advanced-form" :open="showAdvanced" @toggle="toggleAdvanced">
         <summary>高级设置</summary>
         <div class="advanced-grid">
           <label><span>时区</span><input v-model.trim="form.timezone" required placeholder="Asia/Shanghai" /></label>
