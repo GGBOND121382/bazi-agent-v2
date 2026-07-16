@@ -1,4 +1,4 @@
-"""Report assembler that can only select validated structured content."""
+"""Report assembler selecting only claims that passed identifier validation."""
 from __future__ import annotations
 
 import uuid
@@ -61,7 +61,7 @@ class ReportAssembler:
                 "warning_codes": [warning.code for warning in chart.warnings],
             },
             "sections": [
-                {"section_id": "analysis", "title": "结构化分析", "content_blocks": blocks}
+                {"section_id": "analysis", "title": "命理综合分析", "content_blocks": blocks}
             ],
             "citations": [
                 {
@@ -73,7 +73,9 @@ class ReportAssembler:
                     "trust_tier": evidence_index[evidence_id].trust_tier,
                 }
                 for evidence_id in used_evidence
+                if evidence_id in evidence_index
             ],
-            "limitations": list(analysis.limitations)
-            + ["传统命理解释不构成医疗、投资或法律建议。"],
+            # Only show limitations the model identified from genuinely missing
+            # data or conflicting schools. Do not append generic audit boilerplate.
+            "limitations": list(analysis.limitations),
         }
