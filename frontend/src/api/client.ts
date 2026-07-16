@@ -1,14 +1,4 @@
-/**
- * Typed HTTP client for the Bazi backend.
- *
- * - All requests carry `X-Request-ID` for log correlation.
- * - All mutations require `Idempotency-Key`.
- * - Errors are normalised to `ApiErrorDTO` (matches contracts/schemas/api_error.schema.json).
- * - No retry logic here; TanStack Query owns retry policy.
- *
- * The client never falls back to a mock on error — that would mask real
- * regressions. Frontend tests can stub `fetch` directly.
- */
+/** Typed HTTP client for the Bazi backend. */
 import type {
   ApiErrorDTO,
   BirthRequest,
@@ -20,6 +10,8 @@ import type {
   AnalysisJobDTO,
   HistoryDTO,
   ConfigurationDTO,
+  FortuneChatRequestDTO,
+  FortuneChatResponseDTO,
 } from './schema'
 
 const REQUEST_ID_HEADER = 'X-Request-ID'
@@ -39,7 +31,6 @@ export class ApiError extends Error {
 
 export interface ClientOptions {
   baseUrl?: string
-  /** Override for testing — defaults to window.fetch. */
   fetcher?: typeof fetch
 }
 
@@ -69,8 +60,6 @@ export class BaziClient {
 
     const response = await this.fetcher(url, init)
     if (!response.ok) {
-      // Try to parse the error envelope; if it doesn't fit the schema,
-      // synthesise a generic INTERNAL_ERROR with safe fields.
       let detail: ApiErrorDTO
       try {
         detail = (await response.json()) as ApiErrorDTO
@@ -90,12 +79,9 @@ export class BaziClient {
   }
 
   createChart(req: BirthRequest): Promise<ChartResultDTO> {
-    return this.request<ChartResultDTO>(
-      'POST',
-      '/v1/charts',
-      req,
-      { [IDEMPOTENCY_HEADER]: `idem_${uuid()}` },
-    )
+    return this.request<ChartResultDTO>('POST', '/v1/charts', req, {
+      [IDEMPOTENCY_HEADER]: `idem_${uuid()}`,
+    })
   }
 
   getChart(chartId: string): Promise<ChartResultDTO> {
@@ -110,7 +96,6 @@ export class BaziClient {
     return this.request<void>('DELETE', `/v1/charts/${encodeURIComponent(chartId)}`)
   }
 
-  // /v1/reports/{report_id} view (placeholder for I2)
   getChartOverviewView(chartId: string): Promise<ChartOverviewViewDTO> {
     return this.request<ChartOverviewViewDTO>(
       'GET',
@@ -135,6 +120,14 @@ export class BaziClient {
       `/v1/charts/${encodeURIComponent(chartId)}/analyses`,
       { user_focus: userFocus, school: 'engineering_policy' },
       { [IDEMPOTENCY_HEADER]: `analysis_${uuid()}` },
+    )
+  }
+
+  chatAboutChart(chartId: string, request: FortuneChatRequestDTO): Promise<FortuneChatResponseDTO> {
+    return this.request<FortuneChatResponseDTO>(
+      'POST',
+      `/v1/charts/${encodeURIComponent(chartId)}/chat`,
+      request,
     )
   }
 
