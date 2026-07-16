@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "chart-result-v1",
+  "title": "ChartResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "chart_id",
+    "calculation_status",
+    "calculation_profile_id",
+    "normalized_time",
+    "calendar",
+    "pillars",
+    "day_master",
+    "facts",
+    "engine_versions",
+    "warnings"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "chart-result-v1"
+    },
+    "chart_id": {
+      "type": "string"
+    },
+    "calculation_status": {
+      "enum": [
+        "passed",
+        "needs_review",
+        "ambiguous",
+        "failed"
+      ]
+    },
+    "calculation_profile_id": {
+      "type": "string"
+    },
+    "normalized_time": {
+      "type": "object"
+    },
+    "calendar": {
+      "type": "object"
+    },
+    "pillars": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "position",
+          "ganzhi",
+          "stem",
+          "branch"
+        ],
+        "properties": {
+          "position": {
+            "enum": [
+              "year",
+              "month",
+              "day",
+              "hour"
+            ]
+          },
+          "ganzhi": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 2
+          },
+          "stem": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1
+          },
+          "branch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1
+          },
+          "nayin": {
+            "type": "string"
+          },
+          "hidden_stems": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "ten_god_of_stem": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "day_master": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1
+    },
+    "facts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "fact_id",
+          "fact_type",
+          "rule_id"
+        ],
+        "properties": {
+          "fact_id": {
+            "type": "string"
+          },
+          "fact_type": {
+            "type": "string"
+          },
+          "value": {},
+          "rule_id": {
+            "type": "string"
+          },
+          "inputs": {
+            "type": "array"
+          }
+        }
+      }
+    },
+    "qiyun": {
+      "type": "object"
+    },
+    "dayun": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "temporal_context": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "engine_versions": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  }
+}

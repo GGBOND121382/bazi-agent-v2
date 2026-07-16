@@ -1,0 +1,24 @@
+{
+  "version": "core_rules_2026_01",
+  "elements": [
+    "wood",
+    "fire",
+    "earth",
+    "metal",
+    "water"
+  ],
+  "generates": {
+    "wood": "fire",
+    "fire": "earth",
+    "earth": "metal",
+    "metal": "water",
+    "water": "wood"
+  },
+  "controls": {
+    "wood": "earth",
+    "earth": "water",
+    "water": "fire",
+    "fire": "metal",
+    "metal": "wood"
+  }
+}

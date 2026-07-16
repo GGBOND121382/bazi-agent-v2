@@ -1,0 +1,283 @@
+{
+  "version": "core_rules_2026_01",
+  "stem_five_combinations": [
+    {
+      "pair": [
+        "甲",
+        "己"
+      ],
+      "transformation_candidate": "earth"
+    },
+    {
+      "pair": [
+        "乙",
+        "庚"
+      ],
+      "transformation_candidate": "metal"
+    },
+    {
+      "pair": [
+        "丙",
+        "辛"
+      ],
+      "transformation_candidate": "water"
+    },
+    {
+      "pair": [
+        "丁",
+        "壬"
+      ],
+      "transformation_candidate": "wood"
+    },
+    {
+      "pair": [
+        "戊",
+        "癸"
+      ],
+      "transformation_candidate": "fire"
+    }
+  ],
+  "branch_six_combinations": [
+    {
+      "pair": [
+        "子",
+        "丑"
+      ],
+      "transformation_candidate": "earth"
+    },
+    {
+      "pair": [
+        "寅",
+        "亥"
+      ],
+      "transformation_candidate": "wood"
+    },
+    {
+      "pair": [
+        "卯",
+        "戌"
+      ],
+      "transformation_candidate": "fire"
+    },
+    {
+      "pair": [
+        "辰",
+        "酉"
+      ],
+      "transformation_candidate": "metal"
+    },
+    {
+      "pair": [
+        "巳",
+        "申"
+      ],
+      "transformation_candidate": "water"
+    },
+    {
+      "pair": [
+        "午",
+        "未"
+      ],
+      "transformation_candidate": "earth"
+    }
+  ],
+  "branch_clashes": [
+    [
+      "子",
+      "午"
+    ],
+    [
+      "丑",
+      "未"
+    ],
+    [
+      "寅",
+      "申"
+    ],
+    [
+      "卯",
+      "酉"
+    ],
+    [
+      "辰",
+      "戌"
+    ],
+    [
+      "巳",
+      "亥"
+    ]
+  ],
+  "branch_harms": [
+    [
+      "子",
+      "未"
+    ],
+    [
+      "丑",
+      "午"
+    ],
+    [
+      "寅",
+      "巳"
+    ],
+    [
+      "卯",
+      "辰"
+    ],
+    [
+      "申",
+      "亥"
+    ],
+    [
+      "酉",
+      "戌"
+    ]
+  ],
+  "branch_breaks": {
+    "status": "configurable_traditional_rule",
+    "pairs": [
+      [
+        "子",
+        "酉"
+      ],
+      [
+        "卯",
+        "午"
+      ],
+      [
+        "辰",
+        "丑"
+      ],
+      [
+        "未",
+        "戌"
+      ],
+      [
+        "寅",
+        "亥"
+      ],
+      [
+        "巳",
+        "申"
+      ]
+    ]
+  },
+  "three_combinations": [
+    {
+      "branches": [
+        "申",
+        "子",
+        "辰"
+      ],
+      "element": "water"
+    },
+    {
+      "branches": [
+        "亥",
+        "卯",
+        "未"
+      ],
+      "element": "wood"
+    },
+    {
+      "branches": [
+        "寅",
+        "午",
+        "戌"
+      ],
+      "element": "fire"
+    },
+    {
+      "branches": [
+        "巳",
+        "酉",
+        "丑"
+      ],
+      "element": "metal"
+    }
+  ],
+  "three_meetings": [
+    {
+      "branches": [
+        "亥",
+        "子",
+        "丑"
+      ],
+      "element": "water"
+    },
+    {
+      "branches": [
+        "寅",
+        "卯",
+        "辰"
+      ],
+      "element": "wood"
+    },
+    {
+      "branches": [
+        "巳",
+        "午",
+        "未"
+      ],
+      "element": "fire"
+    },
+    {
+      "branches": [
+        "申",
+        "酉",
+        "戌"
+      ],
+      "element": "metal"
+    }
+  ],
+  "punishments": [
+    {
+      "type": "three_punishment",
+      "branches": [
+        "寅",
+        "巳",
+        "申"
+      ]
+    },
+    {
+      "type": "three_punishment",
+      "branches": [
+        "丑",
+        "未",
+        "戌"
+      ]
+    },
+    {
+      "type": "mutual_punishment",
+      "branches": [
+        "子",
+        "卯"
+      ]
+    },
+    {
+      "type": "self_punishment",
+      "branches": [
+        "辰"
+      ]
+    },
+    {
+      "type": "self_punishment",
+      "branches": [
+        "午"
+      ]
+    },
+    {
+      "type": "self_punishment",
+      "branches": [
+        "酉"
+      ]
+    },
+    {
+      "type": "self_punishment",
+      "branches": [
+        "亥"
+      ]
+    }
+  ],
+  "warning": "Combination is a relation candidate and does not by itself prove transformation."
+}

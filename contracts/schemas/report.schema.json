@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "report-v1",
+  "title": "BaziReport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "report_id",
+    "chart_id",
+    "validation_id",
+    "metadata",
+    "calculation_assumptions",
+    "sections",
+    "citations",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "report-v1"
+    },
+    "report_id": {
+      "type": "string"
+    },
+    "chart_id": {
+      "type": "string"
+    },
+    "validation_id": {
+      "type": "string"
+    },
+    "metadata": {
+      "type": "object"
+    },
+    "calculation_assumptions": {
+      "type": "object"
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "section_id",
+          "title",
+          "content_blocks"
+        ],
+        "properties": {
+          "section_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "content_blocks": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "citations": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

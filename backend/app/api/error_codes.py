@@ -1,0 +1,45 @@
+"""Centralized error code constants.
+
+All API error responses must use one of these. New codes require updating
+the table in /README.md and bumping the api-error schema if the shape changes.
+"""
+from __future__ import annotations
+
+from enum import StrEnum
+
+
+class ErrorCode(StrEnum):
+    INVALID_INPUT = "INVALID_INPUT"
+    TIMEZONE_UNKNOWN = "TIMEZONE_UNKNOWN"
+    AMBIGUOUS_TIME_REQUIRES_FOLD = "AMBIGUOUS_TIME_REQUIRES_FOLD"
+    NONEXISTENT_TIME = "NONEXISTENT_TIME"
+    CHART_CROSS_ENGINE_CONFLICT = "CHART_CROSS_ENGINE_CONFLICT"
+    CHART_NEEDS_USER_RESOLUTION = "CHART_NEEDS_USER_RESOLUTION"
+    PROFILE_UNKNOWN = "PROFILE_UNKNOWN"
+    JOB_NOT_FOUND = "JOB_NOT_FOUND"
+    JOB_NOT_CANCELLABLE = "JOB_NOT_CANCELLABLE"
+    ANALYSIS_VALIDATION_FAILED = "ANALYSIS_VALIDATION_FAILED"
+    EVALUATION_SET_FORBIDDEN = "EVALUATION_SET_FORBIDDEN"
+    RATE_LIMITED = "RATE_LIMITED"
+    INTERNAL_ERROR = "INTERNAL_ERROR"
+
+    @property
+    def http_status(self) -> int:
+        return _HTTP_STATUS.get(self, 500)
+
+
+_HTTP_STATUS: dict[ErrorCode, int] = {
+    ErrorCode.INVALID_INPUT: 422,
+    ErrorCode.TIMEZONE_UNKNOWN: 422,
+    ErrorCode.AMBIGUOUS_TIME_REQUIRES_FOLD: 422,
+    ErrorCode.NONEXISTENT_TIME: 422,
+    ErrorCode.PROFILE_UNKNOWN: 422,
+    ErrorCode.CHART_CROSS_ENGINE_CONFLICT: 409,
+    ErrorCode.CHART_NEEDS_USER_RESOLUTION: 409,
+    ErrorCode.JOB_NOT_CANCELLABLE: 409,
+    ErrorCode.ANALYSIS_VALIDATION_FAILED: 409,
+    ErrorCode.EVALUATION_SET_FORBIDDEN: 403,
+    ErrorCode.JOB_NOT_FOUND: 404,
+    ErrorCode.RATE_LIMITED: 429,
+    ErrorCode.INTERNAL_ERROR: 500,
+}

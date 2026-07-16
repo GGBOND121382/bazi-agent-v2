@@ -1,0 +1,74 @@
+schema_version: calculation-profile-v1
+profile_id: ziping_standard_v1
+status: provisional_default
+language: zh-CN
+
+calendar:
+  year_boundary: lichun_exact_time
+  month_boundary: jie_exact_time
+  solar_term_precision: second
+  lunar_calendar_variant: chinese_standard
+
+civil_time:
+  timezone_source: iana_zoneinfo
+  reject_naive_datetime: true
+  daylight_saving_policy: historical_zone_rules
+  ambiguous_time_policy: require_fold_or_candidate
+  nonexistent_time_policy: reject_and_explain
+
+time_basis:
+  default: civil_time
+  allowed:
+    - civil_time
+    - local_mean_solar_time
+    - true_solar_time
+  true_solar_time:
+    longitude_correction: enabled
+    equation_of_time: enabled
+    implementation: strategy_adapter
+
+day_boundary:
+  default: midnight_00
+  allowed:
+    - midnight_00
+    - late_zi_23
+    - split_zi_hour
+
+hour_branch:
+  interval: two_hours
+  zi_hour_start: "23:00"
+  day_stem_for_hour_rule: follows_day_boundary_strategy
+
+dayun:
+  direction_rule: gender_and_year_stem_yinyang
+  forward_reference: next_jie
+  reverse_reference: previous_jie
+  qiyun_conversion: three_days_one_year
+  traditional_month_days: 30
+  dayun_period_years: 10
+  first_pillar_offset_from_month: 1
+
+relations:
+  combination_means_transformation: false
+  enable_branch_break: true
+  enable_self_punishment: true
+
+shensha:
+  rule_set: core_v1
+  default_reference_priority:
+    - day_stem
+    - day_branch
+    - year_stem
+    - year_branch
+  interpretation_weight: auxiliary_only
+
+analysis:
+  school: ziping_standard
+  allow_mixed_school: false
+  uncertainty_language_required: true
+  prohibit_deterministic_life_event_claims: true
+
+versioning:
+  rule_version: core_rules_2026_01
+  prompt_version: prompts_2026_01
+  report_schema_version: report-v1

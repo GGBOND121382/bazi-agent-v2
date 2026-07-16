@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "user-preferences-v1",
+  "title": "UserPreferences",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "language",
+    "detail_level",
+    "theme"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "user-preferences-v1"
+    },
+    "language": {
+      "enum": [
+        "zh-CN",
+        "zh-TW"
+      ]
+    },
+    "detail_level": {
+      "enum": [
+        "concise",
+        "professional"
+      ]
+    },
+    "theme": {
+      "enum": [
+        "light",
+        "dark",
+        "system"
+      ]
+    },
+    "reduce_motion": {
+      "type": "boolean"
+    },
+    "default_analysis_topics": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

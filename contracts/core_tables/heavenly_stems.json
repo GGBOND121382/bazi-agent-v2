@@ -1,0 +1,65 @@
+{
+  "version": "core_rules_2026_01",
+  "items": [
+    {
+      "name": "甲",
+      "index": 0,
+      "yin_yang": "yang",
+      "element": "wood"
+    },
+    {
+      "name": "乙",
+      "index": 1,
+      "yin_yang": "yin",
+      "element": "wood"
+    },
+    {
+      "name": "丙",
+      "index": 2,
+      "yin_yang": "yang",
+      "element": "fire"
+    },
+    {
+      "name": "丁",
+      "index": 3,
+      "yin_yang": "yin",
+      "element": "fire"
+    },
+    {
+      "name": "戊",
+      "index": 4,
+      "yin_yang": "yang",
+      "element": "earth"
+    },
+    {
+      "name": "己",
+      "index": 5,
+      "yin_yang": "yin",
+      "element": "earth"
+    },
+    {
+      "name": "庚",
+      "index": 6,
+      "yin_yang": "yang",
+      "element": "metal"
+    },
+    {
+      "name": "辛",
+      "index": 7,
+      "yin_yang": "yin",
+      "element": "metal"
+    },
+    {
+      "name": "壬",
+      "index": 8,
+      "yin_yang": "yang",
+      "element": "water"
+    },
+    {
+      "name": "癸",
+      "index": 9,
+      "yin_yang": "yin",
+      "element": "water"
+    }
+  ]
+}

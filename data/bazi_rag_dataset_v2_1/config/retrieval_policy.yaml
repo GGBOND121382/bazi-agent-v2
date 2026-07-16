@@ -1,0 +1,42 @@
+version: 2
+collections:
+  authoritative_evidence:
+    include:
+      - approved_core
+    filters:
+      production_enabled: true
+      permissions.can_support_claim: true
+      trust_tier: [A, B]
+    top_k: 8
+  similar_cases:
+    include:
+      - benchmark_case_qa
+    filters:
+      production_enabled: true
+      permissions.can_support_case_analogy: true
+      trust_tier: [C]
+    top_k: 4
+  explanation_examples:
+    include:
+      - qa_explanations
+    filters:
+      production_enabled: true
+      permissions.can_supply_explanation: true
+      trust_tier: [C]
+    top_k: 4
+  disabled_by_default:
+    - qa_quarantine
+    - synthetic_reasoning_corpus
+rules:
+  - deterministic_engine_results_override_all_rag_content
+  - final_rule_claims_require_a_or_b_tier_chunk_ids
+  - c_tier_qa_cannot_independently_support_universal_rules
+  - historical_case_outcomes_cannot_be_projected_as_inevitable_user_outcomes
+  - benchmark_case_qa_is_for_case_analogy_and_retrieval_not_deterministic_prediction
+  - quarantine_and_low_trust_data_must_not_enter_production_index
+  - medical_legal_financial_predictions_must_not_be_presented_as_certainty
+context_groups:
+  - authoritative_evidence
+  - similar_cases
+  - explanation_examples
+  - conflicting_evidence

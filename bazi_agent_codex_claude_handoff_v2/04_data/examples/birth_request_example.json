@@ -1,0 +1,24 @@
+{
+  "schema_version": "birth-request-v1",
+  "gender": "male",
+  "birth_datetime_local": "1990-08-12T14:35:00+08:00",
+  "timezone": "Asia/Shanghai",
+  "birthplace": {
+    "country": "中国",
+    "province": "四川省",
+    "city": "成都市",
+    "longitude": 104.0665,
+    "latitude": 30.5723
+  },
+  "time_precision": "minute",
+  "uncertainty_minutes": 0,
+  "calculation_profile_id": "ziping_standard_v1",
+  "user_focus": [
+    "命局结构",
+    "2026年流年"
+  ],
+  "analysis_range": {
+    "start": "2026-01-01",
+    "end": "2026-12-31"
+  }
+}

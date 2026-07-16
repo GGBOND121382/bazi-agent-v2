@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "job-event-v1",
+  "title": "JobEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "job_id",
+    "stage",
+    "progress",
+    "message_key",
+    "occurred_at",
+    "retryable"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "job-event-v1"
+    },
+    "event_id": {
+      "type": "string"
+    },
+    "job_id": {
+      "type": "string"
+    },
+    "stage": {
+      "enum": [
+        "queued",
+        "calculating",
+        "needs_user_resolution",
+        "retrieving",
+        "interpreting",
+        "verifying",
+        "revision_pending",
+        "report_building",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "progress": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "message_key": {
+      "type": "string"
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "safe_details": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "result_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "error_code": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}

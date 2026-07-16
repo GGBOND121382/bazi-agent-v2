@@ -1,0 +1,154 @@
+{
+  "schema_version": "chart-overview-view-v1",
+  "chart_id": "chart_demo_001",
+  "display_name": "示例命盘",
+  "status": "calculated",
+  "pillars": [
+    {
+      "position": "year",
+      "stem": "庚",
+      "branch": "午",
+      "ten_god": "伤官",
+      "hidden_stems": [
+        {
+          "stem": "丁",
+          "ten_god": "偏印"
+        },
+        {
+          "stem": "己",
+          "ten_god": "比肩"
+        }
+      ],
+      "nayin": "路旁土",
+      "growth_stage": "临官",
+      "fact_ids": [
+        "FACT-Y-1"
+      ]
+    },
+    {
+      "position": "month",
+      "stem": "甲",
+      "branch": "申",
+      "ten_god": "正官",
+      "hidden_stems": [
+        {
+          "stem": "庚",
+          "ten_god": "伤官"
+        },
+        {
+          "stem": "壬",
+          "ten_god": "正财"
+        },
+        {
+          "stem": "戊",
+          "ten_god": "劫财"
+        }
+      ],
+      "nayin": "泉中水",
+      "growth_stage": "沐浴",
+      "fact_ids": [
+        "FACT-M-1"
+      ]
+    },
+    {
+      "position": "day",
+      "stem": "己",
+      "branch": "酉",
+      "ten_god": null,
+      "hidden_stems": [
+        {
+          "stem": "辛",
+          "ten_god": "食神"
+        }
+      ],
+      "nayin": "大驿土",
+      "growth_stage": "长生",
+      "fact_ids": [
+        "FACT-D-1"
+      ]
+    },
+    {
+      "position": "hour",
+      "stem": "辛",
+      "branch": "未",
+      "ten_god": "食神",
+      "hidden_stems": [
+        {
+          "stem": "己",
+          "ten_god": "比肩"
+        },
+        {
+          "stem": "丁",
+          "ten_god": "偏印"
+        },
+        {
+          "stem": "乙",
+          "ten_god": "七杀"
+        }
+      ],
+      "nayin": "路旁土",
+      "growth_stage": "冠带",
+      "fact_ids": [
+        "FACT-H-1"
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "label": "时间口径",
+      "value": "北京时间（未启用真太阳时）"
+    },
+    {
+      "label": "年界",
+      "value": "立春精确时刻"
+    },
+    {
+      "label": "换日",
+      "value": "00:00"
+    }
+  ],
+  "warnings": [
+    {
+      "severity": "info",
+      "message": "此为界面开发示例数据，不可作为真实命盘依据。"
+    }
+  ],
+  "relationships": [
+    {
+      "type": "branch_clash",
+      "label": "卯酉冲",
+      "participants": [
+        "流日卯",
+        "日支酉"
+      ],
+      "rule_id": "BRANCH-CLASH-001"
+    }
+  ],
+  "five_elements": [
+    {
+      "element": "木",
+      "explicit": 1,
+      "hidden": 1
+    },
+    {
+      "element": "火",
+      "explicit": 1,
+      "hidden": 2
+    },
+    {
+      "element": "土",
+      "explicit": 1,
+      "hidden": 3
+    },
+    {
+      "element": "金",
+      "explicit": 3,
+      "hidden": 3
+    },
+    {
+      "element": "水",
+      "explicit": 0,
+      "hidden": 1
+    }
+  ]
+}

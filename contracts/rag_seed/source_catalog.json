@@ -1,0 +1,16 @@
+{
+  "schema_version": "source-catalog-v1",
+  "sources": [
+    {
+      "source_id": "HANDOFF-CORE",
+      "title": "项目自包含基础计算与工程规则",
+      "license": "project_original",
+      "status": "approved",
+      "allowed_uses": [
+        "rag",
+        "testing",
+        "documentation"
+      ]
+    }
+  ]
+}

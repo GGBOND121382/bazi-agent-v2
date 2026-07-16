@@ -1,0 +1,66 @@
+# ===== Dependencies =====
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# ===== Caches =====
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.eslintcache
+.cache/
+
+# ===== Local config & secrets (keep .env.example in VCS) =====
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.apikey
+api*-key
+
+# ===== Runtime artifacts (per project convention) =====
+.runtime/
+logs/
+*.log
+*.pid
+test-results/
+playwright-report/
+coverage/
+
+# ===== OS / editor =====
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# ===== Build outputs =====
+frontend/dist/
+frontend/build/
+frontend/.vite/
+contracts/schemas/.snapshots/
+
+# ===== Agent session memory (may contain sensitive project state) =====
+.claude/
+
+# ===== Defensive: parent-directory secrets must never sneak in =====
+# If you ever run `git` from D:\claudeWorkspace\算命 (one level up),
+# these guard the deepseek-apikey file.
+/deepseek-apikey
+
+# ===== RAG dataset (Plan B: ~120M, clone-and-runnable) =====
+# Keep: import/sqlite/bazi_rag.sqlite, data/production/*.jsonl,
+#       config/retrieval_policy.yaml, schemas/, reports/, examples/,
+#       scripts/, manifest.json, checksums.sha256, all *.md.
+# Exclude:
+data/bazi_rag_dataset_v2_1/import/chroma/
+data/bazi_rag_dataset_v2_1/import/qdrant/
+data/bazi_rag_dataset_v2_1/data/quarantine/
+data/bazi_rag_dataset_v2_1/data/low_trust/
+data/bazi_rag_dataset_v2_1/data/excluded/
+data/bazi_rag_dataset_v2_1/data/source_registry/

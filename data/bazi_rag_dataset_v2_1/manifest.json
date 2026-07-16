@@ -1,0 +1,186 @@
+{
+  "dataset": "bazi_rag_dataset_v2_1",
+  "version": "2.1.0",
+  "created_at": "2026-07-16T11:59:15.545129+00:00",
+  "summary": {
+    "dataset_version": "2.1.0",
+    "built_at": "2026-07-16T11:59:15.545129+00:00",
+    "source_inventory": {
+      "foundation_approved_core": 234,
+      "eightwords_conversations": 3902,
+      "eightwords_assistant_turns": 12211,
+      "eightwords_unique_qa_pairs": 9001,
+      "eightwords_exact_duplicates_removed": 3210,
+      "low_trust_synthetic_reasoning": 427,
+      "yeji_korean_raw_rows_removed_from_package": 15830,
+      "yeji_korean_unique_cases_removed_from_package": 7915,
+      "yeji_default_non_bazi_rows_excluded": 27735,
+      "baziqa_contest8_source_questions": 200,
+      "mingli_bench_source_questions": 160,
+      "mingli_bench_overlap_with_baziqa": 160,
+      "formal_benchmark_unique_case_records": 200
+    },
+    "output_counts": {
+      "approved_core": 234,
+      "qa_explanations_auto_screened": 7203,
+      "benchmark_case_qa": 200,
+      "combined_production_rag": 7637,
+      "qa_quarantine": 1798,
+      "low_trust_synthetic_reasoning": 427,
+      "korean_records_in_package": 0,
+      "exact_duplicate_qa_excluded": 3210
+    },
+    "benchmark_integration": {
+      "strategy": "all formal benchmark questions are production RAG case examples",
+      "baziqa_contest8_included": 200,
+      "mingli_bench_source_rows": 160,
+      "deduplicated_overlap": 160,
+      "unique_vectors_added": 200,
+      "celebrity50_status": "not silently included; auxiliary source drift documented in data/source_registry/celebrity50_auxiliary_status.json"
+    },
+    "critical_findings": [
+      "The current yeji-processed Dataset Viewer split contains no bazi-labeled rows and remains excluded.",
+      "All Korean synthetic cases were removed from the deliverable.",
+      "MingLi-Bench 2022-2025 questions overlap the corresponding BaziQA Contest8 questions; dual provenance is retained without duplicate vectors.",
+      "Benchmark cases are historical case examples and cannot independently establish universal rules or inevitable predictions.",
+      "Only approved_core may independently support factual rule claims."
+    ]
+  },
+  "files": [
+    {
+      "path": "DATA_CARD.md",
+      "size_bytes": 1173,
+      "sha256": "0dc26ef8c73f3b18eee7f111b0f9c131bd1c5eaac491cdaf12fad835a68713f3"
+    },
+    {
+      "path": "GOVERNANCE.md",
+      "size_bytes": 1103,
+      "sha256": "133a691808a0b026cf6f75a92c6999b7baf5bd57bbeeef7d717b7c9595597a02"
+    },
+    {
+      "path": "HANDOFF_TO_CODEX_CLAUDE.md",
+      "size_bytes": 1121,
+      "sha256": "413623a18b998f9917cdd984adc4ee7e9c5fc91ad54555edd0a199445260c7b3"
+    },
+    {
+      "path": "INTEGRATION.md",
+      "size_bytes": 907,
+      "sha256": "1eac36f3ca378f12b69cc6d3aa16d8af74eb8b9ce54a7d0fd8a14e11734e7156"
+    },
+    {
+      "path": "LICENSES_AND_ATTRIBUTION.md",
+      "size_bytes": 870,
+      "sha256": "95cfcc12752776bf48604c2c9076887227b1efe78fd916e328a2e72b7035563d"
+    },
+    {
+      "path": "README.md",
+      "size_bytes": 2283,
+      "sha256": "18dd1bf9cfb0bf330b99f6dbff435d093d089e189a0b0ae62ab98491b8b02a87"
+    },
+    {
+      "path": "config/retrieval_policy.yaml",
+      "size_bytes": 1246,
+      "sha256": "71198dac5e0f6925afe2ef2494cd1a815e8f2c34bbd3f2d914992de67d722b36"
+    },
+    {
+      "path": "data/excluded/exact_duplicate_qa.jsonl",
+      "size_bytes": 243960,
+      "sha256": "cd531c6d45d4cd3693af68420808713a8d8abfba1a3941b5a1be84a103f30f23"
+    },
+    {
+      "path": "data/excluded/yeji_default_exclusion_report.json",
+      "size_bytes": 485,
+      "sha256": "7a3abe0c80b7c977c5a9ffe60a2c6b603276d70a52d85a289543af181967b552"
+    },
+    {
+      "path": "data/low_trust/synthetic_reasoning_corpus.jsonl",
+      "size_bytes": 7380734,
+      "sha256": "7c57bdddf7ea2a49c0f4e2c9dd4777b6b780d8818f7e372918271667f71a1649"
+    },
+    {
+      "path": "data/production/approved_core.jsonl",
+      "size_bytes": 528749,
+      "sha256": "ae943abcc4cc598a2d35398dd8a9e5f998939849d781ee8949340a8d495d132e"
+    },
+    {
+      "path": "data/production/benchmark_case_qa.jsonl",
+      "size_bytes": 663828,
+      "sha256": "3ca655f8bcb035c8fd33050166ac687a9c7508457606142372d2d27426be12d9"
+    },
+    {
+      "path": "data/production/combined_rag.jsonl",
+      "size_bytes": 28247807,
+      "sha256": "f2e97addd089796faf65fa87ba6566ed4f3a4879627b7d6eb4ade5d62b03bd68"
+    },
+    {
+      "path": "data/production/qa_explanations.jsonl",
+      "size_bytes": 27055230,
+      "sha256": "aa5bfdee536670554548f9698b1bb4d5b7313115b2319369375238e60c373662"
+    },
+    {
+      "path": "data/quarantine/qa_flagged.jsonl",
+      "size_bytes": 7457004,
+      "sha256": "1046534c04d70cb88a4567716ac066fd2278df1c4edf1d308aea738b59526a0e"
+    },
+    {
+      "path": "data/source_registry/benchmark_sources.json",
+      "size_bytes": 1142,
+      "sha256": "26235d6eccc57a660f5800edbb08ee2b08fd3da0b444a9580e7973320ca2aea2"
+    },
+    {
+      "path": "data/source_registry/celebrity50_auxiliary_status.json",
+      "size_bytes": 613,
+      "sha256": "126e7f8fffbadb4f8b4f817e66787e32121a1e7e50191b34b2e62d6d03b9522f"
+    },
+    {
+      "path": "examples/sample_queries.json",
+      "size_bytes": 482,
+      "sha256": "36280ac1c4ab3405545dc9ffde778be366b054aa94eb4fec3e8ec13ccb6efc33"
+    },
+    {
+      "path": "import/chroma/documents.jsonl",
+      "size_bytes": 8034743,
+      "sha256": "bde9da4a75f127a3f58f4ce297457edf4fac976516e6144f4355e6e61bccc358"
+    },
+    {
+      "path": "import/qdrant/payloads.jsonl",
+      "size_bytes": 28668654,
+      "sha256": "3b3ca1368bf144964ed263f5afedf742c5e2a63f69785393533b0c05887c8c6b"
+    },
+    {
+      "path": "import/sqlite/bazi_rag.sqlite",
+      "size_bytes": 66297856,
+      "sha256": "7b7c9b131772cb23fba344422b620a230b5edf77f1ebfb06d9e8f4d6cf1d0415"
+    },
+    {
+      "path": "reports/quality_score_distribution.csv",
+      "size_bytes": 779,
+      "sha256": "3523e7789791baf45c01f3ca7a185e372e8495904e2021c1ece00ea1e186de63"
+    },
+    {
+      "path": "reports/summary.json",
+      "size_bytes": 1966,
+      "sha256": "40383a7ca627ba90d3c75afb5c9d9c1757c097f608cc35ab59ed18101462262b"
+    },
+    {
+      "path": "reports/topic_distribution.csv",
+      "size_bytes": 6703,
+      "sha256": "3e56a941c97b9450c3f82e5790ae9e311cd92dd452fbea4c35474a664a13666d"
+    },
+    {
+      "path": "schemas/rag_record_v2.schema.json",
+      "size_bytes": 1643,
+      "sha256": "7a21ba8f2a80a4c7380fababaf4a62b5ed7cf6bd386deee8c077e54e0cbcb665"
+    },
+    {
+      "path": "scripts/query_sqlite.py",
+      "size_bytes": 628,
+      "sha256": "0166dfde49cc11c6868aabe904e4c789031ab5b90d88c97271b1d24d4023ec3b"
+    },
+    {
+      "path": "scripts/validate_dataset.py",
+      "size_bytes": 1303,
+      "sha256": "41a3fe847743d8c095367021233d5977d3bfdd2a0b5b3bbe78626357f3bc523a"
+    }
+  ]
+}

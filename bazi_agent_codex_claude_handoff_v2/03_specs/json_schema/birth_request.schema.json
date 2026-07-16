@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "birth-request-v1",
+  "title": "BirthRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "gender",
+    "birth_datetime_local",
+    "timezone",
+    "birthplace",
+    "calculation_profile_id"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "birth-request-v1"
+    },
+    "gender": {
+      "enum": [
+        "male",
+        "female",
+        "unspecified"
+      ]
+    },
+    "birth_datetime_local": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Local ISO datetime with offset when known; API may also accept separate local time plus timezone but must normalize before domain use."
+    },
+    "timezone": {
+      "type": "string",
+      "minLength": 1
+    },
+    "fold": {
+      "type": "integer",
+      "enum": [
+        0,
+        1
+      ]
+    },
+    "birthplace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "country",
+        "city"
+      ],
+      "properties": {
+        "country": {
+          "type": "string"
+        },
+        "province": {
+          "type": "string"
+        },
+        "city": {
+          "type": "string"
+        },
+        "longitude": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "latitude": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        }
+      }
+    },
+    "time_precision": {
+      "enum": [
+        "second",
+        "minute",
+        "hour",
+        "unknown"
+      ]
+    },
+    "uncertainty_minutes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "calculation_profile_id": {
+      "type": "string"
+    },
+    "user_focus": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "analysis_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "type": "string",
+          "format": "date"
+        },
+        "end": {
+          "type": "string",
+          "format": "date"
+        }
+      }
+    }
+  }
+}

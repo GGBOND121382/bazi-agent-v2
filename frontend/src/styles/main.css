@@ -1,0 +1,46 @@
+:root { font-family: Inter, "Noto Sans SC", system-ui, sans-serif; color: #29251f; background: #f4f0e8; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+a { color: inherit; }
+button, input, select { font: inherit; }
+button, .primary-action { border: 1px solid #6d4c35; border-radius: 999px; padding: .65rem 1rem; background: #fffaf0; color: #4a2f20; cursor: pointer; }
+button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid #b37737; outline-offset: 3px; }
+.app-shell { min-height: 100vh; display: grid; grid-template-rows: auto 1fr auto; }
+.topbar { position: sticky; top: 0; z-index: 10; display: flex; justify-content: space-between; padding: 1rem clamp(1rem, 4vw, 4rem); background: rgba(244,240,232,.94); border-bottom: 1px solid #d8cdbd; backdrop-filter: blur(12px); }.topbar nav { display: flex; gap: 1rem; }
+.brand { font-family: "Noto Serif SC", serif; font-weight: 700; text-decoration: none; letter-spacing: .12em; }
+.page-shell { width: min(1120px, calc(100% - 2rem)); margin: 0 auto; padding: clamp(2rem, 5vw, 5rem) 0; }
+footer { padding: 1.5rem; text-align: center; color: #70675c; border-top: 1px solid #d8cdbd; }
+.hero { max-width: 760px; padding: 8vh 0; }
+.hero h1 { font: 700 clamp(2.8rem, 8vw, 6.5rem)/1.05 "Noto Serif SC", serif; margin: .4rem 0 1.5rem; }
+.eyebrow { color: #8b4b2b; text-transform: uppercase; letter-spacing: .12em; font-size: .82rem; }
+.primary-action { display: inline-block; margin-top: 1.5rem; text-decoration: none; background: #523526; color: white; }
+table { width: 100%; border-collapse: collapse; background: #fffaf3; }
+th, td { padding: .8rem; border: 1px solid #ddd0bf; text-align: left; }
+fieldset { display: grid; gap: 1rem; border: 1px solid #cfbea8; background: #fffaf3; padding: 1.5rem; margin-bottom: 1rem; }
+label { display: inline-flex; gap: .55rem; align-items: center; margin: .4rem; }
+input, select { padding: .55rem; border: 1px solid #a89b8b; border-radius: .35rem; background: white; }
+[data-state="error"] { color: #8d251e; }
+.breadcrumbs { display: flex; flex-wrap: wrap; gap: .65rem; margin: 1.5rem 0; }
+.temporal-summary, .month-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .8rem; }
+.temporal-summary article, .month-grid article, .claim-card, .callout { display: grid; gap: .4rem; padding: 1rem; background: #fffaf3; border: 1px solid #d5c4ad; border-radius: .65rem; }
+.temporal-summary strong, .month-grid strong { font: 700 1.8rem "Noto Serif SC", serif; }
+code { font-size: .72rem; overflow-wrap: anywhere; color: #675b4f; }
+.report-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 2rem; }
+.toc { position: sticky; top: 5rem; align-self: start; display: grid; gap: .7rem; }
+.report-body { min-width: 0; }
+.drawer-backdrop { position: fixed; inset: 0; z-index: 30; background: rgba(24,18,14,.38); display: flex; justify-content: flex-end; }
+.evidence-drawer { width: min(480px, 100%); height: 100%; overflow: auto; padding: 1.4rem; background: #f8f3ea; box-shadow: -12px 0 40px #251a1328; }
+.evidence-drawer header { display: flex; justify-content: space-between; align-items: start; }
+.evidence-card { margin: 1rem 0; padding: 1rem; border-left: 4px solid; background: white; }
+.evidence-card[data-layer="fact"] { border-color: #326b68; }.evidence-card[data-layer="rule"] { border-color: #976328; }.evidence-card[data-layer="model"] { border-color: #67548b; }
+.layer-label { font-size: .75rem; font-weight: 700; letter-spacing: .08em; }
+.page-actions { display: flex; gap: 1rem; align-items: center; margin-top: 1.5rem; }
+.progress-track { height: .75rem; overflow: hidden; border-radius: 999px; background: #ded4c6; }
+.progress-track span { display: block; height: 100%; background: #76513b; transition: width .25s ease; }
+.job-events { display: grid; gap: .5rem; padding: 0; list-style: none; }
+.job-events li { display: grid; grid-template-columns: 4rem 1fr auto; padding: .75rem; background: #fffaf3; border-bottom: 1px solid #d5c4ad; }
+.privacy-note { color: #70675c; font-size: .86rem; }
+.history-card { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; margin: .8rem 0; padding: 1rem; background: #fffaf3; border: 1px solid #d5c4ad; }.history-card div { display: grid; margin-right: auto; }.share-token { overflow-wrap: anywhere; }
+@page { size: A4; margin: 18mm 16mm 20mm; @bottom-center { content: "四柱研习 · 第 " counter(page) " 页"; } }
+@media (max-width: 720px) { .report-layout { grid-template-columns: 1fr; }.toc { position: static; display: flex; overflow-x: auto; }.page-shell { width: min(100% - 1rem, 1120px); }.topbar { padding: .8rem 1rem; } }
+@media print { .topbar, footer, .toc, button, .drawer-backdrop { display: none !important; }.page-shell { width: 100%; padding: 0; }.report-layout { display: block; }.claim-card { break-inside: avoid; } }

@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+.venv/
+venv/
+
+# Local config
+.env
+.env.*
+!.env.example
+
+# Logs and runtime
+logs/
+*.log
+.playwright/
+playwright-report/
+test-results/
+coverage/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated
+frontend/src/api/generated/
+contracts/schemas/.snapshots/
+
+# Evaluation isolation
+evaluation_isolation/

@@ -1,0 +1,211 @@
+{
+  "schema_version": "source-manifest-v1",
+  "generated_at": "2026-07-16",
+  "sources": [
+    {
+      "source_id": "HF-TELLANG-YEJI-PROCESSED",
+      "name": "tellang/yeji-processed",
+      "source_type": "huggingface_dataset",
+      "url": "https://huggingface.co/datasets/tellang/yeji-processed",
+      "download_id": "tellang/yeji-processed",
+      "declared_license": "MIT",
+      "verified_snapshot": "page observed 2026-07-16: 27.7k viewer rows; repository 185 MB; mixed Korean/Chinese; domains include bazi, tarot, astrology",
+      "intended_use": "training_candidate",
+      "default_bucket": "quarantine",
+      "risk": "high",
+      "risks": [
+        "mixed domains and languages",
+        "dataset samples cite third-party websites",
+        "upstream rights may not be covered by dataset-level MIT",
+        "synthetic and source mixtures"
+      ],
+      "required_filters": [
+        "domain == bazi",
+        "Chinese language detection",
+        "deduplication",
+        "source-level license audit",
+        "remove evaluation overlaps",
+        "expert factual review"
+      ],
+      "never_use_for": "unreviewed production RAG"
+    },
+    {
+      "source_id": "HF-CLINNO-EIGHTWORDS",
+      "name": "clinno/eightwords-241112",
+      "source_type": "huggingface_dataset",
+      "url": "https://huggingface.co/datasets/clinno/eightwords-241112",
+      "download_id": "clinno/eightwords-241112",
+      "declared_license": "Apache-2.0",
+      "verified_snapshot": "page observed 2026-07-16: JSON; 1K-10K size class; 4.55 MB; described for multi-turn fine-tuning",
+      "intended_use": "training_candidate",
+      "default_bucket": "quarantine",
+      "risk": "medium_high",
+      "risks": [
+        "limited provenance details",
+        "traditional Chinese and conversation quality need inspection",
+        "possible generated content"
+      ],
+      "required_filters": [
+        "schema inspection",
+        "language normalization with original preservation",
+        "deduplication",
+        "expert review"
+      ]
+    },
+    {
+      "source_id": "HF-CZUO-BAZI-300",
+      "name": "czuo03/bazi-reasoning-300",
+      "source_type": "huggingface_dataset",
+      "url": "https://huggingface.co/datasets/czuo03/bazi-reasoning-300",
+      "download_id": "czuo03/bazi-reasoning-300",
+      "declared_license": "CC-BY-4.0",
+      "verified_snapshot": "page observed 2026-07-16: 327 Chinese records; 928 kB; generated with DeepSeek-R1-0528 from lectures/textbooks",
+      "intended_use": "synthetic_reasoning_candidate",
+      "default_bucket": "quarantine",
+      "risk": "high",
+      "risks": [
+        "synthetic reasoning may be post-hoc or wrong",
+        "upstream lecture/textbook rights unclear",
+        "long CoT unsuitable for direct storage"
+      ],
+      "required_filters": [
+        "convert to structured reasoning summary",
+        "programmatic fact checking",
+        "expert approval",
+        "retain attribution"
+      ]
+    },
+    {
+      "source_id": "HF-CZUO-BAZI-100",
+      "name": "czuo03/bazi-reasoning-100",
+      "source_type": "huggingface_dataset",
+      "url": "https://huggingface.co/datasets/czuo03/bazi-reasoning-100",
+      "download_id": "czuo03/bazi-reasoning-100",
+      "declared_license": "CC-BY-4.0",
+      "verified_snapshot": "page observed 2026-07-16: Chinese parquet; fewer than 1K records",
+      "intended_use": "synthetic_reasoning_candidate",
+      "default_bucket": "quarantine",
+      "risk": "high",
+      "risks": [
+        "possible overlap with 300 set",
+        "synthetic CoT",
+        "upstream provenance"
+      ],
+      "required_filters": [
+        "cross-dataset deduplication",
+        "structured summary conversion",
+        "expert approval",
+        "retain attribution"
+      ]
+    },
+    {
+      "source_id": "HF-TELLANG-BAZI-RULES",
+      "name": "tellang/yeji-bazi-rules",
+      "source_type": "huggingface_dataset",
+      "url": "https://huggingface.co/datasets/tellang/yeji-bazi-rules",
+      "download_id": "tellang/yeji-bazi-rules",
+      "declared_license": "MIT",
+      "verified_snapshot": "page observed 2026-07-16: 7 viewer rows; 1.02 MB; includes classics/sanming_tonghui.txt, classics/yuanhai_ziping.txt, docs and rules/shensha_51.json",
+      "intended_use": "reference_library_candidate",
+      "default_bucket": "quarantine",
+      "risk": "medium_high",
+      "risks": [
+        "dataset-level license may not fully describe classical text source and derived notes",
+        "rule correctness unverified",
+        "Korean/Chinese mixture"
+      ],
+      "required_filters": [
+        "compare classics with attributed public-domain editions",
+        "verify every rule",
+        "add chapter-level provenance"
+      ]
+    },
+    {
+      "source_id": "GH-BAZIQA",
+      "name": "ChenJiangxi/BaziQA",
+      "source_type": "github_repository",
+      "url": "https://github.com/ChenJiangxi/BaziQA",
+      "archive_url": "https://github.com/ChenJiangxi/BaziQA/archive/refs/heads/main.zip",
+      "declared_license": "MIT",
+      "verified_snapshot": "page observed 2026-07-16: Contest8 2021-2025 plus Celebrity50; 90 people and 450 questions; real or anonymized birth/event data",
+      "intended_use": "evaluation_only",
+      "default_bucket": "evaluation_only",
+      "risk": "privacy_and_contamination",
+      "risks": [
+        "real person birth/event information",
+        "benchmark contamination invalidates evaluation"
+      ],
+      "required_filters": [
+        "never index for RAG",
+        "never train",
+        "retain license",
+        "store access controls"
+      ]
+    },
+    {
+      "source_id": "GH-MINGLI-BENCH",
+      "name": "DestinyLinker/MingLi-Bench",
+      "source_type": "github_repository",
+      "url": "https://github.com/DestinyLinker/MingLi-Bench",
+      "archive_url": "https://github.com/DestinyLinker/MingLi-Bench/archive/refs/heads/main.zip",
+      "declared_license": "MIT",
+      "verified_snapshot": "page observed 2026-07-16: 160 normalized multiple-choice questions; precomputed charts; 12 life aspects; 2022-2025",
+      "intended_use": "evaluation_only",
+      "default_bucket": "evaluation_only",
+      "risk": "contamination",
+      "risks": [
+        "benchmark contamination",
+        "contains Bazi and Ziwei tasks"
+      ],
+      "required_filters": [
+        "select Bazi subset where applicable",
+        "never train",
+        "never RAG"
+      ]
+    },
+    {
+      "source_id": "WS-YUANHAI-ZIPING",
+      "name": "维基文库《渊海子平》",
+      "source_type": "wikisource",
+      "url": "https://zh.wikisource.org/wiki/淵海子平",
+      "declared_license": "CC-BY-SA-4.0 site text; underlying ancient work may be public domain",
+      "verified_snapshot": "page observed 2026-07-16; page exists; site attribution/version required",
+      "intended_use": "reference_library_candidate",
+      "default_bucket": "quarantine",
+      "risk": "medium",
+      "risks": [
+        "page marked as lacking source in site category",
+        "edition and transcription quality",
+        "share-alike obligations"
+      ],
+      "required_filters": [
+        "store revision id",
+        "retain attribution",
+        "compare edition",
+        "manual sectioning"
+      ]
+    },
+    {
+      "source_id": "WS-SANMING-TONGHUI",
+      "name": "维基文库《三命通会》",
+      "source_type": "wikisource",
+      "url": "https://zh.wikisource.org/wiki/三命通會",
+      "declared_license": "CC-BY-SA-4.0 site text; ancient work public-domain status should be recorded by edition",
+      "verified_snapshot": "page observed 2026-07-16; multiple volumes available; site text states CC BY-SA 4.0",
+      "intended_use": "reference_library_candidate",
+      "default_bucket": "quarantine",
+      "risk": "medium",
+      "risks": [
+        "edition variants and later insertions",
+        "share-alike obligations",
+        "classical text requires segmentation and interpretation separation"
+      ],
+      "required_filters": [
+        "store revision id and volume",
+        "retain original text",
+        "separate modern interpretation",
+        "expert review"
+      ]
+    }
+  ]
+}

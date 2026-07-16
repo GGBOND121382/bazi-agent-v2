@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "chart-overview-view-v1",
+  "title": "ChartOverviewView",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "chart_id",
+    "display_name",
+    "status",
+    "pillars",
+    "assumptions",
+    "warnings",
+    "relationships"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "chart-overview-view-v1"
+    },
+    "chart_id": {
+      "type": "string"
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "calculated",
+        "needs_user_resolution",
+        "needs_review"
+      ]
+    },
+    "pillars": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "required": [
+          "position",
+          "stem",
+          "branch",
+          "hidden_stems",
+          "fact_ids"
+        ],
+        "properties": {
+          "position": {
+            "enum": [
+              "year",
+              "month",
+              "day",
+              "hour"
+            ]
+          },
+          "stem": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "ten_god": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hidden_stems": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "nayin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "growth_stage": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fact_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "relationships": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "five_elements": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  }
+}

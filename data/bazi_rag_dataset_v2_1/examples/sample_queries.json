@@ -1,0 +1,22 @@
+[
+  {
+    "query": "甲日主见辛是什么十神",
+    "mode": "authoritative_only"
+  },
+  {
+    "query": "什么是八字用神",
+    "mode": "core_plus_explanations"
+  },
+  {
+    "query": "月令在旺衰判断中的作用",
+    "mode": "core_plus_explanations"
+  },
+  {
+    "query": "1974年4月28日16:40出生男性的历史相似命例",
+    "mode": "similar_cases"
+  },
+  {
+    "query": "流年发生婚姻变化的历史命例",
+    "mode": "core_plus_similar_cases"
+  }
+]

@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "calculation-profile-v1",
+  "title": "CalculationProfile",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "profile_id",
+    "calendar",
+    "civil_time",
+    "time_basis",
+    "day_boundary",
+    "dayun",
+    "relations",
+    "shensha",
+    "versioning"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "calculation-profile-v1"
+    },
+    "profile_id": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    },
+    "calendar": {
+      "type": "object"
+    },
+    "civil_time": {
+      "type": "object"
+    },
+    "time_basis": {
+      "type": "object"
+    },
+    "day_boundary": {
+      "type": "object"
+    },
+    "hour_branch": {
+      "type": "object"
+    },
+    "dayun": {
+      "type": "object"
+    },
+    "relations": {
+      "type": "object"
+    },
+    "shensha": {
+      "type": "object"
+    },
+    "analysis": {
+      "type": "object"
+    },
+    "versioning": {
+      "type": "object"
+    }
+  }
+}

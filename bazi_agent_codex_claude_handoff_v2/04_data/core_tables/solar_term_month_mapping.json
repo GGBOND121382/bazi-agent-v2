@@ -1,0 +1,79 @@
+{
+  "version": "core_rules_2026_01",
+  "month_boundaries": [
+    {
+      "jie": "立春",
+      "month_branch": "寅",
+      "offset_from_yin": 0
+    },
+    {
+      "jie": "惊蛰",
+      "month_branch": "卯",
+      "offset_from_yin": 1
+    },
+    {
+      "jie": "清明",
+      "month_branch": "辰",
+      "offset_from_yin": 2
+    },
+    {
+      "jie": "立夏",
+      "month_branch": "巳",
+      "offset_from_yin": 3
+    },
+    {
+      "jie": "芒种",
+      "month_branch": "午",
+      "offset_from_yin": 4
+    },
+    {
+      "jie": "小暑",
+      "month_branch": "未",
+      "offset_from_yin": 5
+    },
+    {
+      "jie": "立秋",
+      "month_branch": "申",
+      "offset_from_yin": 6
+    },
+    {
+      "jie": "白露",
+      "month_branch": "酉",
+      "offset_from_yin": 7
+    },
+    {
+      "jie": "寒露",
+      "month_branch": "戌",
+      "offset_from_yin": 8
+    },
+    {
+      "jie": "立冬",
+      "month_branch": "亥",
+      "offset_from_yin": 9
+    },
+    {
+      "jie": "大雪",
+      "month_branch": "子",
+      "offset_from_yin": 10
+    },
+    {
+      "jie": "小寒",
+      "month_branch": "丑",
+      "offset_from_yin": 11
+    }
+  ],
+  "yin_month_start_stem_by_year_stem_group": {
+    "甲己": "丙",
+    "乙庚": "戊",
+    "丙辛": "庚",
+    "丁壬": "壬",
+    "戊癸": "甲"
+  },
+  "zi_hour_start_stem_by_day_stem_group": {
+    "甲己": "甲",
+    "乙庚": "丙",
+    "丙辛": "戊",
+    "丁壬": "庚",
+    "戊癸": "壬"
+  }
+}

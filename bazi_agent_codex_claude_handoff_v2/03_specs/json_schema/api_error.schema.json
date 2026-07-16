@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "api-error-v1",
+  "title": "ApiError",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "request_id",
+    "error_code",
+    "message_key",
+    "retryable"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "api-error-v1"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "error_code": {
+      "type": "string"
+    },
+    "message_key": {
+      "type": "string"
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "field_errors": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "safe_details": {
+      "type": "object"
+    }
+  }
+}

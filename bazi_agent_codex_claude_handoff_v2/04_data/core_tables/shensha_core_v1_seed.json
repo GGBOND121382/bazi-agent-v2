@@ -1,0 +1,125 @@
+{
+  "version": "core_v1",
+  "status": "seed_rules_require_source_review",
+  "rules": [
+    {
+      "rule_id": "SHENSHA-TIANYI-001",
+      "name": "天乙贵人",
+      "reference": "day_stem",
+      "mapping": {
+        "甲": [
+          "丑",
+          "未"
+        ],
+        "戊": [
+          "丑",
+          "未"
+        ],
+        "庚": [
+          "丑",
+          "未"
+        ],
+        "乙": [
+          "子",
+          "申"
+        ],
+        "己": [
+          "子",
+          "申"
+        ],
+        "丙": [
+          "亥",
+          "酉"
+        ],
+        "丁": [
+          "亥",
+          "酉"
+        ],
+        "壬": [
+          "卯",
+          "巳"
+        ],
+        "癸": [
+          "卯",
+          "巳"
+        ],
+        "辛": [
+          "寅",
+          "午"
+        ]
+      },
+      "note": "Some schools also inspect year stem; keep reference configurable."
+    },
+    {
+      "rule_id": "SHENSHA-WENCHANG-001",
+      "name": "文昌贵人",
+      "reference": "day_stem",
+      "mapping": {
+        "甲": [
+          "巳"
+        ],
+        "乙": [
+          "午"
+        ],
+        "丙": [
+          "申"
+        ],
+        "戊": [
+          "申"
+        ],
+        "丁": [
+          "酉"
+        ],
+        "己": [
+          "酉"
+        ],
+        "庚": [
+          "亥"
+        ],
+        "辛": [
+          "子"
+        ],
+        "壬": [
+          "寅"
+        ],
+        "癸": [
+          "卯"
+        ]
+      }
+    },
+    {
+      "rule_id": "SHENSHA-TAOHUA-001",
+      "name": "桃花",
+      "reference": "day_or_year_branch_group",
+      "mapping": {
+        "申子辰": "酉",
+        "寅午戌": "卯",
+        "巳酉丑": "午",
+        "亥卯未": "子"
+      }
+    },
+    {
+      "rule_id": "SHENSHA-YIMA-001",
+      "name": "驿马",
+      "reference": "day_or_year_branch_group",
+      "mapping": {
+        "申子辰": "寅",
+        "寅午戌": "申",
+        "巳酉丑": "亥",
+        "亥卯未": "巳"
+      }
+    },
+    {
+      "rule_id": "SHENSHA-HUAGAI-001",
+      "name": "华盖",
+      "reference": "day_or_year_branch_group",
+      "mapping": {
+        "申子辰": "辰",
+        "寅午戌": "戌",
+        "巳酉丑": "丑",
+        "亥卯未": "未"
+      }
+    }
+  ],
+  "policy": "Matches are auxiliary facts only; no direct life-event conclusion."
+}

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rag-chunk-v1",
+  "title": "RagChunk",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "chunk_id",
+    "source_id",
+    "status",
+    "content_original",
+    "content_normalized",
+    "content_hash",
+    "license",
+    "provenance",
+    "metadata"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "rag-chunk-v1"
+    },
+    "chunk_id": {
+      "type": "string"
+    },
+    "source_id": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "raw",
+        "quarantine",
+        "reviewed",
+        "approved",
+        "rejected",
+        "evaluation_only"
+      ]
+    },
+    "content_original": {
+      "type": "string"
+    },
+    "content_normalized": {
+      "type": "string"
+    },
+    "content_hash": {
+      "type": "string"
+    },
+    "language": {
+      "type": "string"
+    },
+    "school": {
+      "type": "string"
+    },
+    "task_type": {
+      "type": "string"
+    },
+    "license": {
+      "type": "string"
+    },
+    "provenance": {
+      "type": "object"
+    },
+    "metadata": {
+      "type": "object"
+    },
+    "review": {
+      "type": "object"
+    }
+  }
+}

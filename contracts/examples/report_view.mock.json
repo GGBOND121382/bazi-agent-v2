@@ -1,0 +1,72 @@
+{
+  "schema_version": "report-view-v1",
+  "report_id": "report_demo_001",
+  "chart_id": "chart_demo_001",
+  "title": "示例命理分析报告",
+  "generated_at": "2026-07-16T12:00:08Z",
+  "calculation_profile_label": "子平标准口径 v1",
+  "toc": [
+    {
+      "anchor": "overview",
+      "title": "命盘总览",
+      "level": 1
+    },
+    {
+      "anchor": "structure",
+      "title": "命局结构",
+      "level": 1
+    },
+    {
+      "anchor": "dayun",
+      "title": "大运与流年",
+      "level": 1
+    }
+  ],
+  "blocks": [
+    {
+      "block_id": "b1",
+      "block_type": "heading",
+      "anchor": "overview",
+      "text": "命盘总览",
+      "level": 1
+    },
+    {
+      "block_id": "b2",
+      "block_type": "callout",
+      "tone": "info",
+      "title": "说明",
+      "text": "此文件为前端开发 mock，不代表真实命理结论。"
+    },
+    {
+      "block_id": "b3",
+      "block_type": "claim",
+      "title": "结构判断示例",
+      "summary": "在当前规则体系下，命局呈现中和偏弱候选。",
+      "confidence": 0.68,
+      "fact_ids": [
+        "FACT-M-1",
+        "FACT-D-1"
+      ],
+      "rule_ids": [
+        "STRENGTH-ROOT-001"
+      ],
+      "evidence_ids": [
+        "EVID-001"
+      ],
+      "counterevidence": [
+        "原局仍存在根气和印比支持。"
+      ]
+    }
+  ],
+  "citations": [
+    {
+      "evidence_id": "EVID-001",
+      "title": "示例规则块",
+      "source_label": "本地开发种子规则",
+      "locator": "RULE-001"
+    }
+  ],
+  "limitations": [
+    "传统命理解释不构成医疗、投资或法律建议。"
+  ]
+}

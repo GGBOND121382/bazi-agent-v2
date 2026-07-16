@@ -1,0 +1,10 @@
+{
+  "generated_at": "2026-07-16",
+  "full_external_files_embedded": false,
+  "reason": "The artifact build container could not resolve external hosts. Metadata was verified through web retrieval, but binary downloads were unavailable.",
+  "local_seed_data_embedded": true,
+  "next_action": "Run download_sources.py in a networked development environment, then perform license/provenance audit before approval.",
+  "last_attempt_at": "2026-07-16T04:45:00Z",
+  "environment_result": "failed_dns",
+  "message": "Container could not resolve huggingface.co. No external dataset content was embedded. Use the provided downloader in a network-enabled environment."
+}

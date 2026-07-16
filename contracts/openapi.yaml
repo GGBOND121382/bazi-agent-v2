@@ -1,0 +1,106 @@
+openapi: 3.1.0
+info:
+  title: Bazi Agent API
+  version: 0.2.0
+servers:
+  - url: /api
+paths:
+  /v1/charts:
+    post:
+      summary: Create and calculate a deterministic chart
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./schemas/birth_request.schema.json
+      responses:
+        "201": {description: Calculated chart or candidate resolution resource}
+        "409": {description: Cross-engine conflict requiring review}
+        "422": {description: Invalid input}
+    get:
+      summary: List current user's chart history
+  /v1/charts/{chart_id}:
+    get:
+      summary: Get chart and deterministic facts
+    delete:
+      summary: Delete chart and derived resources
+  /v1/charts/{chart_id}/candidate-resolution:
+    post:
+      summary: Select one candidate chart for a boundary case
+  /v1/charts/{chart_id}/temporal:
+    get:
+      summary: Calculate requested year/month/day context on demand
+  /v1/charts/{chart_id}/overview-view:
+    get:
+      summary: Get the backend-assembled chart overview view
+  /v1/charts/{chart_id}/temporal/{target_year}:
+    get:
+      summary: Get a year and 12 solar-term-month context
+  /v1/charts/{chart_id}/analyses:
+    post:
+      summary: Start RAG, structured interpretation and verification
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: {type: string}
+  /v1/jobs/{job_id}:
+    get:
+      summary: Get current job snapshot
+  /v1/jobs/{job_id}/events:
+    get:
+      summary: SSE stream; supports Last-Event-ID
+      responses:
+        "200":
+          description: text/event-stream of JobEvent
+  /v1/jobs/{job_id}/cancel:
+    post:
+      summary: Cancel a cancellable job
+  /v1/analyses/{analysis_id}:
+    get:
+      summary: Get validated structured analysis
+  /v1/reports/{report_id}:
+    get:
+      summary: Get typed ReportView for screen rendering
+  /v1/reports/{report_id}/exports:
+    post:
+      summary: Start HTML/PDF export
+  /v1/exports/{export_id}:
+    get:
+      summary: Get export status and short-lived download URL
+  /v1/reports/{report_id}/shares:
+    post:
+      summary: Create an expiring share token; disabled by default
+  /v1/history:
+    get:
+      summary: List anonymous chart and report history
+  /v1/charts/{chart_id}/note:
+    patch:
+      summary: Update a non-sensitive anonymous chart note
+  /v1/shares/{share_id}:
+    delete:
+      summary: Revoke share token
+  /v1/sources:
+    get:
+      summary: List approved source metadata visible to users
+  /v1/settings/profile:
+    get:
+      summary: Get user preferences and read-only calculation profile summary
+    patch:
+      summary: Update non-domain user preferences
+  /v1/settings/configuration:
+    get:
+      summary: Get read-only calculation and model configuration
+  /v1/health:
+    get:
+      summary: Health and dependency status
+components:
+  headers:
+    RequestId:
+      schema: {type: string}

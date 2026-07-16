@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>八字命理智能体 · 前端原型</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip" href="#main">跳到主要内容</a>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="seal">命</span><div><b>命理研析</b><small>结构化八字智能体</small></div></div>
+      <nav aria-label="命盘导航">
+        <button class="nav-item active" data-view="overview">总览</button>
+        <button class="nav-item" data-view="structure">五行结构</button>
+        <button class="nav-item" data-view="dayun">大运时间轴</button>
+        <button class="nav-item" data-view="report">综合报告</button>
+      </nav>
+      <div class="sidebar-note"><span>计算口径</span><strong>子平标准 v1</strong><small>立春换年 · 节令换月 · 00:00 换日</small></div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div><small class="eyebrow">示例命盘</small><h1>命盘工作台</h1></div>
+        <div class="top-actions"><button class="ghost" id="progressBtn">查看分析进度</button><button class="primary">导出报告</button></div>
+      </header>
+
+      <main id="main" tabindex="-1">
+        <section class="notice"><span class="dot"></span><div><strong>界面开发示例</strong><p>以下内容为 mock 数据，只用于展示前端结构，不代表真实命理结论。</p></div><button>查看计算口径</button></section>
+
+        <section id="overview" class="view active-view">
+          <div class="section-heading"><div><small>FOUR PILLARS</small><h2>四柱命盘</h2></div><div class="mode-switch"><button class="active">简洁</button><button>专业</button></div></div>
+          <div class="pillars-grid">
+            <article class="pillar"><span class="position">年柱</span><div class="stem metal">庚</div><div class="branch fire">午</div><span class="ten-god">伤官</span><div class="hidden"><b>藏干</b><span>丁 · 己</span></div></article>
+            <article class="pillar"><span class="position">月柱</span><div class="stem wood">甲</div><div class="branch metal">申</div><span class="ten-god">正官</span><div class="hidden"><b>藏干</b><span>庚 · 壬 · 戊</span></div></article>
+            <article class="pillar day-master"><span class="position">日柱 · 日主</span><div class="stem earth">己</div><div class="branch metal">酉</div><span class="ten-god">日元</span><div class="hidden"><b>藏干</b><span>辛</span></div></article>
+            <article class="pillar"><span class="position">时柱</span><div class="stem metal">辛</div><div class="branch earth">未</div><span class="ten-god">食神</span><div class="hidden"><b>藏干</b><span>己 · 丁 · 乙</span></div></article>
+          </div>
+
+          <div class="dashboard-grid">
+            <article class="panel element-panel"><div class="panel-title"><div><small>ELEMENTS</small><h3>五行分布</h3></div><button class="link">查看结构 →</button></div>
+              <div class="bars">
+                <div class="bar-row"><span>木</span><div><i class="wood-bg" style="width:28%"></i></div><b>2</b></div>
+                <div class="bar-row"><span>火</span><div><i class="fire-bg" style="width:42%"></i></div><b>3</b></div>
+                <div class="bar-row"><span>土</span><div><i class="earth-bg" style="width:58%"></i></div><b>4</b></div>
+                <div class="bar-row"><span>金</span><div><i class="metal-bg" style="width:82%"></i></div><b>6</b></div>
+                <div class="bar-row"><span>水</span><div><i class="water-bg" style="width:18%"></i></div><b>1</b></div>
+              </div>
+            </article>
+            <article class="panel"><div class="panel-title"><div><small>RELATIONS</small><h3>原局关系</h3></div></div>
+              <div class="relation-list"><span class="relation neutral">申酉相邻</span><span class="relation warm">丙辛合候选</span><span class="relation cool">金气较集中</span></div>
+              <p class="muted">关系只显示程序已计算的事实；“合”不自动等同于化气成功。</p>
+            </article>
+            <article class="panel current-luck"><div class="panel-title"><div><small>CURRENT LUCK</small><h3>当前大运</h3></div><span class="badge">进行中</span></div>
+              <div class="luck-main"><strong>丁亥</strong><div><b>2022 — 2031</b><span>32–41 岁</span></div></div><button class="wide-button" data-view-link="dayun">查看完整时间轴</button>
+            </article>
+          </div>
+        </section>
+
+        <section id="structure" class="view">
+          <div class="section-heading"><div><small>STRUCTURE</small><h2>五行与命局结构</h2></div></div>
+          <div class="source-legend"><span><i class="fact"></i>程序事实</span><span><i class="rule"></i>传统规则</span><span><i class="model"></i>模型归纳</span></div>
+          <article class="claim-card"><div class="claim-head"><span class="model-pill">模型归纳</span><span class="confidence">证据强度 68%</span></div><h3>中和偏弱候选</h3><p>在当前规则体系下，月令与根气给出相反方向的证据，因此保留“中和偏弱”作为候选判断。</p><div class="evidence-grid"><div><b>支持证据</b><span>月令不直接扶身</span><span>财官泄耗较明显</span></div><div><b>反向证据</b><span>原局仍有根气</span><span>印比提供支持</span></div></div><button class="evidence-btn">查看事实、规则与引用</button></article>
+        </section>
+
+        <section id="dayun" class="view">
+          <div class="section-heading"><div><small>DAYUN TIMELINE</small><h2>起运与大运</h2></div></div>
+          <article class="qiyun"><div><small>起运方向</small><b>顺排</b></div><div><small>参考节气</small><b>白露</b></div><div><small>起运年龄</small><b>8岁2月</b></div><div><small>起运日期</small><b>1998-10-23</b></div></article>
+          <div class="timeline">
+            <div class="axis"></div>
+            <button class="luck-node"><span>8</span><b>乙酉</b><small>1998–2007</small></button>
+            <button class="luck-node"><span>18</span><b>丙戌</b><small>2008–2017</small></button>
+            <button class="luck-node active"><span>28</span><b>丁亥</b><small>2018–2027</small></button>
+            <button class="luck-node"><span>38</span><b>戊子</b><small>2028–2037</small></button>
+            <button class="luck-node"><span>48</span><b>己丑</b><small>2038–2047</small></button>
+          </div>
+          <article class="panel timeline-detail"><span class="badge">当前选择</span><h3>丁亥大运</h3><p>此处展示大运干支、十神、与原局的计算关系以及验证后的摘要。选择年份后进入对应流年。</p><button class="primary">查看 2026 流年</button></article>
+        </section>
+
+        <section id="report" class="view report-layout">
+          <aside class="toc"><b>报告目录</b><a href="#r1">计算说明</a><a href="#r2">命局结构</a><a href="#r3">大运流年</a><a href="#r4">来源与限制</a></aside>
+          <article class="report-paper"><small class="eyebrow">VALIDATED REPORT</small><h2>示例命理分析报告</h2><p class="lead">报告只使用通过事实与引用验证的结构化内容，支持展开依据并导出 PDF。</p><h3 id="r1">计算说明</h3><p>按北京时间、立春精确时刻换年、节令精确时刻换月和 00:00 换日。</p><h3 id="r2">命局结构</h3><div class="inline-claim"><b>结构判断示例</b><p>在当前规则体系下呈现中和偏弱候选，存在相反证据。</p><button>展开依据</button></div><h3 id="r3">大运流年</h3><p>时间层级按照原局 → 大运 → 流年 → 流月 → 流日解释。</p><h3 id="r4">来源与限制</h3><p>传统命理分析不构成医疗、法律、投资或其他专业建议。</p></article>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <dialog id="progressDialog">
+    <div class="dialog-head"><div><small>ANALYSIS PIPELINE</small><h2>分析进度</h2></div><button id="closeDialog" aria-label="关闭">×</button></div>
+    <ol class="steps">
+      <li class="done"><span>✓</span><div><b>时间标准化与排盘</b><small>计算口径和四柱已验证</small></div></li>
+      <li class="done"><span>✓</span><div><b>起运与大运</b><small>中间量已保存</small></div></li>
+      <li class="done"><span>✓</span><div><b>资料检索</b><small>仅使用 approved 知识块</small></div></li>
+      <li class="current"><span>4</span><div><b>事实与引用验证</b><small>正在核对结构化结论</small></div></li>
+      <li><span>5</span><div><b>报告生成</b><small>等待验证通过</small></div></li>
+    </ol>
+    <p class="privacy-note">此处不展示模型内部思维过程。</p>
+  </dialog>
+  <script src="app.js"></script>
+</body>
+</html>

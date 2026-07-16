@@ -1,0 +1,142 @@
+{
+  "version": "core_rules_2026_01",
+  "note": "role is ordering, not a universal numeric weight",
+  "items": {
+    "子": [
+      {
+        "stem": "癸",
+        "role": "main"
+      }
+    ],
+    "丑": [
+      {
+        "stem": "己",
+        "role": "main"
+      },
+      {
+        "stem": "癸",
+        "role": "middle"
+      },
+      {
+        "stem": "辛",
+        "role": "residual"
+      }
+    ],
+    "寅": [
+      {
+        "stem": "甲",
+        "role": "main"
+      },
+      {
+        "stem": "丙",
+        "role": "middle"
+      },
+      {
+        "stem": "戊",
+        "role": "residual"
+      }
+    ],
+    "卯": [
+      {
+        "stem": "乙",
+        "role": "main"
+      }
+    ],
+    "辰": [
+      {
+        "stem": "戊",
+        "role": "main"
+      },
+      {
+        "stem": "乙",
+        "role": "middle"
+      },
+      {
+        "stem": "癸",
+        "role": "residual"
+      }
+    ],
+    "巳": [
+      {
+        "stem": "丙",
+        "role": "main"
+      },
+      {
+        "stem": "戊",
+        "role": "middle"
+      },
+      {
+        "stem": "庚",
+        "role": "residual"
+      }
+    ],
+    "午": [
+      {
+        "stem": "丁",
+        "role": "main"
+      },
+      {
+        "stem": "己",
+        "role": "middle"
+      }
+    ],
+    "未": [
+      {
+        "stem": "己",
+        "role": "main"
+      },
+      {
+        "stem": "丁",
+        "role": "middle"
+      },
+      {
+        "stem": "乙",
+        "role": "residual"
+      }
+    ],
+    "申": [
+      {
+        "stem": "庚",
+        "role": "main"
+      },
+      {
+        "stem": "壬",
+        "role": "middle"
+      },
+      {
+        "stem": "戊",
+        "role": "residual"
+      }
+    ],
+    "酉": [
+      {
+        "stem": "辛",
+        "role": "main"
+      }
+    ],
+    "戌": [
+      {
+        "stem": "戊",
+        "role": "main"
+      },
+      {
+        "stem": "辛",
+        "role": "middle"
+      },
+      {
+        "stem": "丁",
+        "role": "residual"
+      }
+    ],
+    "亥": [
+      {
+        "stem": "壬",
+        "role": "main"
+      },
+      {
+        "stem": "甲",
+        "role": "middle"
+      }
+    ]
+  }
+}

@@ -1,0 +1,406 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "report-view-v1",
+  "title": "ReportView",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "report_id",
+    "chart_id",
+    "title",
+    "generated_at",
+    "toc",
+    "blocks",
+    "citations",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "report-view-v1"
+    },
+    "report_id": {
+      "type": "string"
+    },
+    "chart_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "calculation_profile_label": {
+      "type": "string"
+    },
+    "toc": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "anchor",
+          "title"
+        ],
+        "properties": {
+          "anchor": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "level": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3
+          }
+        }
+      }
+    },
+    "blocks": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/heading"
+          },
+          {
+            "$ref": "#/$defs/paragraph"
+          },
+          {
+            "$ref": "#/$defs/factGrid"
+          },
+          {
+            "$ref": "#/$defs/table"
+          },
+          {
+            "$ref": "#/$defs/timeline"
+          },
+          {
+            "$ref": "#/$defs/chart"
+          },
+          {
+            "$ref": "#/$defs/claim"
+          },
+          {
+            "$ref": "#/$defs/callout"
+          },
+          {
+            "$ref": "#/$defs/evidenceList"
+          }
+        ]
+      }
+    },
+    "citations": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "base": {
+      "type": "object",
+      "required": [
+        "block_id",
+        "block_type"
+      ],
+      "properties": {
+        "block_id": {
+          "type": "string"
+        },
+        "block_type": {
+          "type": "string"
+        },
+        "anchor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "heading": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "block_type": {
+              "const": "heading"
+            },
+            "text": {
+              "type": "string"
+            },
+            "level": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3
+            }
+          },
+          "required": [
+            "text",
+            "level"
+          ]
+        }
+      ]
+    },
+    "paragraph": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "block_type": {
+              "const": "paragraph"
+            },
+            "text": {
+              "type": "string"
+            },
+            "citation_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      ]
+    },
+    "factGrid": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "block_type": {
+              "const": "fact_grid"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          },
+          "required": [
+            "items"
+          ]
+        }
+      ]
+    },
+    "table": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "block_type": {
+              "const": "table"
+            },
+            "columns": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          },
+          "required": [
+            "columns",
+            "rows"
+          ]
+        }
+      ]
+    },
+    "timeline": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "block_type": {
+              "const": "timeline"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          },
+          "required": [
+            "items"
+          ]
+        }
+      ]
+    },
+    "chart": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "block_type": {
+              "const": "chart"
+            },
+            "chart_kind": {
+              "type": "string"
+            },
+            "data": {
+              "type": "object"
+            },
+            "text_alternative": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "chart_kind",
+            "data",
+            "text_alternative"
+          ]
+        }
+      ]
+    },
+    "claim": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "block_type": {
+              "const": "claim"
+            },
+            "title": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "confidence": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "fact_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "rule_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "evidence_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "counterevidence": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "title",
+            "summary",
+            "fact_ids",
+            "rule_ids",
+            "evidence_ids"
+          ]
+        }
+      ]
+    },
+    "callout": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "block_type": {
+              "const": "callout"
+            },
+            "tone": {
+              "enum": [
+                "info",
+                "warning",
+                "limitation"
+              ]
+            },
+            "title": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "tone",
+            "text"
+          ]
+        }
+      ]
+    },
+    "evidenceList": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "block_type": {
+              "const": "evidence_list"
+            },
+            "evidence_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "evidence_ids"
+          ]
+        }
+      ]
+    }
+  }
+}

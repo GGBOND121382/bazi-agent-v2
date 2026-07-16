@@ -1,0 +1,53 @@
+{
+  "name": "bazi-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit",
+    "lint": "eslint . --ext .ts,.vue",
+    "format": "prettier --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install --with-deps chromium",
+    "gen:api": "openapi-typescript ../contracts/openapi.yaml -o src/api/generated/schema.ts"
+  },
+  "dependencies": {
+    "vue": "^3.4",
+    "vue-router": "^4.4",
+    "pinia": "^2.2",
+    "@tanstack/vue-query": "^5.51",
+    "echarts": "^5.5",
+    "vue-echarts": "^7.0",
+    "ajv": "^8.16",
+    "ajv-formats": "^3.0",
+    "clsx": "^2.1",
+    "date-fns": "^3.6",
+    "date-fns-tz": "^3.1",
+    "dompurify": "^3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@vitejs/plugin-vue": "^5.1",
+    "@vue/test-utils": "^2.4",
+    "typescript": "^5.5",
+    "vite": "^5.4",
+    "vue-tsc": "^2.1",
+    "vitest": "^2.0",
+    "@vitest/coverage-v8": "^2.0",
+    "happy-dom": "^15.0",
+    "@playwright/test": "^1.46",
+    "axe-core": "^4.10",
+    "@axe-core/playwright": "^4.10",
+    "eslint": "^9.9",
+    "@typescript-eslint/parser": "^8.2",
+    "@typescript-eslint/eslint-plugin": "^8.2",
+    "eslint-plugin-vue": "^9.27",
+    "prettier": "^3.3",
+    "openapi-typescript": "^7.4"
+  }
+}

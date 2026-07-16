@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bazi-rag-record-v2",
+  "title": "Bazi RAG Record v2",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "chunk_id",
+    "collection",
+    "status",
+    "production_enabled",
+    "trust_tier",
+    "knowledge_type",
+    "retrieval_text",
+    "language",
+    "source",
+    "permissions",
+    "quality",
+    "safety",
+    "dedup"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "bazi-rag-record-v2"
+    },
+    "chunk_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "collection": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    },
+    "production_enabled": {
+      "type": "boolean"
+    },
+    "trust_tier": {
+      "enum": [
+        "A",
+        "B",
+        "C",
+        "Q"
+      ]
+    },
+    "knowledge_type": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "question": {
+      "type": "string"
+    },
+    "answer": {
+      "type": "string"
+    },
+    "context": {
+      "type": "string"
+    },
+    "retrieval_text": {
+      "type": "string"
+    },
+    "retrieval_text_zh_cn": {
+      "type": "string"
+    },
+    "language": {
+      "type": "string"
+    },
+    "school": {
+      "type": "string"
+    },
+    "topics": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "source": {
+      "type": "object"
+    },
+    "permissions": {
+      "type": "object"
+    },
+    "quality": {
+      "type": "object"
+    },
+    "safety": {
+      "type": "object"
+    },
+    "dedup": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true
+}

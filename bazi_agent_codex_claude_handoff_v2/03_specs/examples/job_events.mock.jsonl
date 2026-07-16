@@ -1,0 +1,7 @@
+{"schema_version": "job-event-v1", "event_id": "1", "job_id": "job_demo_001", "stage": "queued", "progress": 0, "message_key": "job.queued", "occurred_at": "2026-07-16T12:00:00Z", "retryable": false}
+{"schema_version": "job-event-v1", "event_id": "2", "job_id": "job_demo_001", "stage": "calculating", "progress": 15, "message_key": "job.calculating", "occurred_at": "2026-07-16T12:00:01Z", "retryable": false}
+{"schema_version": "job-event-v1", "event_id": "3", "job_id": "job_demo_001", "stage": "retrieving", "progress": 35, "message_key": "job.retrieving", "occurred_at": "2026-07-16T12:00:02Z", "retryable": true}
+{"schema_version": "job-event-v1", "event_id": "4", "job_id": "job_demo_001", "stage": "interpreting", "progress": 55, "message_key": "job.interpreting", "occurred_at": "2026-07-16T12:00:04Z", "retryable": true}
+{"schema_version": "job-event-v1", "event_id": "5", "job_id": "job_demo_001", "stage": "verifying", "progress": 78, "message_key": "job.verifying", "occurred_at": "2026-07-16T12:00:06Z", "retryable": true}
+{"schema_version": "job-event-v1", "event_id": "6", "job_id": "job_demo_001", "stage": "report_building", "progress": 90, "message_key": "job.report_building", "occurred_at": "2026-07-16T12:00:07Z", "retryable": true}
+{"schema_version": "job-event-v1", "event_id": "7", "job_id": "job_demo_001", "stage": "completed", "progress": 100, "message_key": "job.completed", "occurred_at": "2026-07-16T12:00:08Z", "retryable": false, "result_ref": "report_demo_001"}

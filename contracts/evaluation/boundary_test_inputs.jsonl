@@ -1,0 +1,6 @@
+{"case_id": "BOUNDARY-LICHUN-BEFORE", "purpose": "replace datetime with verified lichun exact time minus one second", "timezone": "Asia/Shanghai", "expected_invariant": "year/month boundary behavior follows profile"}
+{"case_id": "BOUNDARY-LICHUN-AFTER", "purpose": "replace datetime with verified lichun exact time plus one second", "timezone": "Asia/Shanghai", "expected_invariant": "material pillar difference is visible"}
+{"case_id": "BOUNDARY-2300", "purpose": "test day boundary strategies around 23:00", "timezone": "Asia/Shanghai", "expected_invariant": "profile changes are explicit"}
+{"case_id": "DST-NONEXISTENT", "purpose": "US spring-forward nonexistent local time", "timezone": "America/Los_Angeles", "expected_invariant": "request rejected or corrected only by explicit policy"}
+{"case_id": "DST-AMBIGUOUS", "purpose": "US fall-back duplicated local time", "timezone": "America/Los_Angeles", "expected_invariant": "fold required or two candidates returned"}
+{"case_id": "TRUE-SOLAR-CROSS-HOUR", "purpose": "select longitude/time where correction crosses a two-hour boundary", "timezone": "Asia/Shanghai", "expected_invariant": "civil and true-solar charts coexist with different profile ids"}
