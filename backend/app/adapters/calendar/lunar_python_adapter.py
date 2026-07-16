@@ -15,6 +15,7 @@ from lunar_python import Solar
 
 from ...domain.chart import EngineVersion, Fact
 from ...domain.pillars import Branch, FourPillars, Pillar, Stem
+from ...domain.rules.renyuan_commander import compute_renyuan_commander
 from ...domain.rules.shensha import evaluate_shensha
 from .base import CalendarAdapter, CalendarResult
 
@@ -253,15 +254,21 @@ class LunarPythonAdapter(CalendarAdapter):
                 }
             )
 
-        prev_jie_qi = lunar.getPrevJieQi(False)
-        next_jie_qi = lunar.getNextJieQi(False)
-        prev_dt = _solar_to_datetime(prev_jie_qi.getSolar(), calculation_time.tzinfo)
-        next_dt = _solar_to_datetime(next_jie_qi.getSolar(), calculation_time.tzinfo)
-        after_prev = _duration_text((calculation_time - prev_dt).total_seconds())
+        # 八字月令 and 人元司令 use the 12 precise 节 boundaries, not every
+        # intermediate 气. For the screenshot example this correctly spans
+        # 大雪 → 小寒 rather than switching at 冬至.
+        prev_jie = lunar.getPrevJie(False)
+        next_jie = lunar.getNextJie(False)
+        prev_dt = _solar_to_datetime(prev_jie.getSolar(), calculation_time.tzinfo)
+        next_dt = _solar_to_datetime(next_jie.getSolar(), calculation_time.tzinfo)
+        elapsed_seconds = max(0.0, (calculation_time - prev_dt).total_seconds())
+        after_prev = _duration_text(elapsed_seconds)
         before_next = _duration_text((next_dt - calculation_time).total_seconds())
+        commander = compute_renyuan_commander(
+            pillars.month.branch.char,
+            elapsed_seconds / 86_400,
+        )
 
-        month_hidden = pillars.month.hidden_stems()
-        commander = month_hidden[0] if month_hidden else pillars.month.stem
         lunar_mansion_parts = [
             str(_safe_call(lunar, "getXiu", "")),
             str(_safe_call(lunar, "getGong", "")),
@@ -287,18 +294,26 @@ class LunarPythonAdapter(CalendarAdapter):
                 "ming_gong_nayin": str(_safe_call(eight_char, "getMingGongNaYin", "")),
                 "shen_gong": str(_safe_call(eight_char, "getShenGong", "")),
                 "shen_gong_nayin": str(_safe_call(eight_char, "getShenGongNaYin", "")),
-                "ren_yuan_commander": f"{commander.char}{_ELEMENT_ZH[commander.element]}用事",
+                "ren_yuan_commander": commander.label,
+                "ren_yuan_commander_detail": {
+                    "stem": commander.stem,
+                    "element": commander.element,
+                    "elapsed_days": round(commander.elapsed_days, 6),
+                    "phase_start_day": commander.phase_start_day,
+                    "phase_end_day": commander.phase_end_day,
+                    "rule_id": commander.rule_id,
+                },
                 "birth_solar_terms": (
-                    f"出生于{prev_jie_qi.getName()}后{after_prev}，"
-                    f"{next_jie_qi.getName()}前{before_next}"
+                    f"出生于{prev_jie.getName()}后{after_prev}，"
+                    f"{next_jie.getName()}前{before_next}"
                 ),
                 "previous_solar_term": {
-                    "name": prev_jie_qi.getName(),
+                    "name": prev_jie.getName(),
                     "datetime": prev_dt.isoformat(),
                     "elapsed": after_prev,
                 },
                 "next_solar_term": {
-                    "name": next_jie_qi.getName(),
+                    "name": next_jie.getName(),
                     "datetime": next_dt.isoformat(),
                     "remaining": before_next,
                 },
