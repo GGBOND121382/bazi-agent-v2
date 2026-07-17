@@ -38,6 +38,56 @@ jobs:
           $report | Set-Content -Path powershell-parser-report.txt -Encoding UTF8
           $report | ForEach-Object { Write-Host $_ }
           if ($failed) { exit 1 }
+      - name: Verify detached stdin behavior
+        shell: powershell
+        run: |
+          $startScript = Get-Content -LiteralPath start.ps1 -Raw
+          $redirectCount = ([regex]::Matches($startScript, '-RedirectStandardInput\s+\$NullInputFile')).Count
+          if ($redirectCount -lt 3) {
+            throw "start.ps1 must redirect stdin for worker, backend, and frontend; found $redirectCount occurrences."
+          }
+
+          $testDir = Join-Path $env:RUNNER_TEMP 'bazi-detached-stdin-test'
+          New-Item -ItemType Directory -Path $testDir -Force | Out-Null
+          $childScript = Join-Path $testDir 'read-stdin.ps1'
+          $inputFile = Join-Path $testDir 'stdin.txt'
+          $outputFile = Join-Path $testDir 'stdout.txt'
+          $errorFile = Join-Path $testDir 'stderr.txt'
+          $resultFile = Join-Path $testDir 'result.txt'
+
+          @'
+          param([string]$ResultPath)
+          $line = [Console]::In.ReadLine()
+          if ($null -eq $line) {
+              'EOF' | Set-Content -LiteralPath $ResultPath -Encoding Ascii
+          } else {
+              "INPUT:$line" | Set-Content -LiteralPath $ResultPath -Encoding Ascii
+          }
+          '@ | Set-Content -LiteralPath $childScript -Encoding Ascii
+          Set-Content -LiteralPath $inputFile -Value '' -Encoding Ascii -NoNewline
+
+          $arguments = @(
+            '-NoProfile',
+            '-NonInteractive',
+            '-File', ('"{0}"' -f $childScript),
+            '-ResultPath', ('"{0}"' -f $resultFile)
+          )
+          $process = Start-Process powershell.exe `
+            -ArgumentList $arguments `
+            -RedirectStandardInput $inputFile `
+            -RedirectStandardOutput $outputFile `
+            -RedirectStandardError $errorFile `
+            -WindowStyle Hidden `
+            -PassThru
+
+          if (-not $process.WaitForExit(5000)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw 'A detached child blocked waiting for the caller console input.'
+          }
+          $result = (Get-Content -LiteralPath $resultFile -Raw).Trim()
+          if ($result -ne 'EOF') {
+            throw "Detached stdin test returned unexpected result: $result"
+          }
       - name: Upload PowerShell parser report
         if: always()
         uses: actions/upload-artifact@v4
