@@ -1,12 +1,13 @@
 <#
-stop.ps1 — 一键停止后端 + 前端
+stop.ps1 — 停止后端、前端和后台启动任务。
 
 用法:
-    .\stop.ps1                                  # 停止默认或已记录端口
-    .\stop.ps1 -Force                           # 立即强制终止进程树
+    .\stop.ps1
+    .\stop.ps1 -Force
     .\stop.ps1 -BackendPort 9000 -FrontendPort 5174
 
-即使 PID 文件丢失，也会根据监听端口和命令行识别本项目进程并停止。
+兼容 Windows PowerShell 5.1。PID 文件缺失时，会按端口和命令行识别本项目进程；
+无法确认为本项目的进程不会被终止。
 #>
 
 [CmdletBinding()]
@@ -27,36 +28,77 @@ $BackendPortFile = Join-Path $RuntimeDir 'backend.port'
 $FrontendPortFile = Join-Path $RuntimeDir 'frontend.port'
 $StartupPidFile = Join-Path $RuntimeDir 'startup.pid'
 
-function Resolve-Port {
+function Resolve-ServicePort {
     param(
         [int]$ExplicitPort,
         [string]$PortFile,
         [int]$DefaultPort
     )
 
-    if ($ExplicitPort -gt 0) { return $ExplicitPort }
-    if (Test-Path $PortFile) {
-        $value = (Get-Content $PortFile -Raw).Trim()
+    if ($ExplicitPort -gt 0) {
+        return $ExplicitPort
+    }
+
+    if (Test-Path -LiteralPath $PortFile) {
+        $value = (Get-Content -LiteralPath $PortFile -Raw).Trim()
         if ($value -match '^\d+$') {
             $parsed = [int]$value
-            if ($parsed -ge 1 -and $parsed -le 65535) { return $parsed }
+            if (($parsed -ge 1) -and ($parsed -le 65535)) {
+                return $parsed
+            }
         }
     }
+
     return $DefaultPort
 }
 
-$ResolvedBackendPort = Resolve-Port `
-    -ExplicitPort $BackendPort `
-    -PortFile $BackendPortFile `
-    -DefaultPort 8000
-$ResolvedFrontendPort = Resolve-Port `
-    -ExplicitPort $FrontendPort `
-    -PortFile $FrontendPortFile `
-    -DefaultPort 5173
+function Remove-TrackingFiles {
+    param(
+        [string]$PidFile,
+        [string]$StartFile
+    )
 
-function Remove-Tracking {
-    param([string]$PidFile, [string]$StartFile)
-    Remove-Item $PidFile,$StartFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $StartFile -Force -ErrorAction SilentlyContinue
+}
+
+function Get-ProcessCommandLine {
+    param([int]$ProcessId)
+
+    $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction SilentlyContinue
+    if ($null -eq $cim) {
+        return ''
+    }
+    return [string]$cim.CommandLine
+}
+
+function Test-ExpectedCommand {
+    param(
+        [ValidateSet('startup', 'backend', 'frontend')][string]$Kind,
+        [string]$CommandLine
+    )
+
+    if ([string]::IsNullOrWhiteSpace($CommandLine)) {
+        return $false
+    }
+
+    if ($Kind -eq 'startup') {
+        $hasScript = $CommandLine.IndexOf('start.ps1', [StringComparison]::OrdinalIgnoreCase) -ge 0
+        $hasWorker = $CommandLine.IndexOf('-Worker', [StringComparison]::OrdinalIgnoreCase) -ge 0
+        return ($hasScript -and $hasWorker)
+    }
+
+    if ($Kind -eq 'backend') {
+        $hasUvicorn = $CommandLine.IndexOf('uvicorn', [StringComparison]::OrdinalIgnoreCase) -ge 0
+        $hasApp = $CommandLine.IndexOf('app.main:app', [StringComparison]::OrdinalIgnoreCase) -ge 0
+        return ($hasUvicorn -and $hasApp)
+    }
+
+    $hasVite = $CommandLine.IndexOf('vite', [StringComparison]::OrdinalIgnoreCase) -ge 0
+    $hasProjectRoot = $CommandLine.IndexOf($ProjectRoot, [StringComparison]::OrdinalIgnoreCase) -ge 0
+    $viteScript = Join-Path $ProjectRoot 'frontend\node_modules\vite\bin\vite.js'
+    $hasViteScript = $CommandLine.IndexOf($viteScript, [StringComparison]::OrdinalIgnoreCase) -ge 0
+    return ($hasVite -and ($hasProjectRoot -or $hasViteScript))
 }
 
 function Stop-ProcessTree {
@@ -68,192 +110,166 @@ function Stop-ProcessTree {
 
     $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
     if ($null -eq $process) {
-        Write-Host "SKIP $Name PID $ProcessId 已不存在" -ForegroundColor DarkGray
+        Write-Host "SKIP  $Name PID $ProcessId 已不存在" -ForegroundColor DarkGray
         return
     }
 
-    Write-Host "STOP $Name pid=$ProcessId ..." -ForegroundColor Yellow
+    Write-Host "STOP  $Name pid=$ProcessId" -ForegroundColor Yellow
+
     if ($ForceStop) {
-        taskkill /F /T /PID $ProcessId 2>&1 | Out-Null
-        Write-Host "KILLED $Name (force)" -ForegroundColor Red
+        & taskkill.exe /F /T /PID $ProcessId 2>&1 | Out-Null
+        Write-Host "KILL  $Name 已强制终止" -ForegroundColor Red
         return
     }
 
     Stop-Process -Id $ProcessId -ErrorAction SilentlyContinue
     $deadline = (Get-Date).AddSeconds(3)
-    do {
+    while ((Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 250
         if ($null -eq (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) {
-            Write-Host "STOPPED $Name" -ForegroundColor Green
+            Write-Host "OK    $Name 已停止" -ForegroundColor Green
             return
         }
-    } while ((Get-Date) -lt $deadline)
+    }
 
-    Write-Host "WARN $Name 未在 3s 内退出，终止进程树" -ForegroundColor Yellow
-    taskkill /F /T /PID $ProcessId 2>&1 | Out-Null
+    Write-Host "WARN  $Name 未在 3 秒内退出，终止进程树" -ForegroundColor Yellow
+    & taskkill.exe /F /T /PID $ProcessId 2>&1 | Out-Null
 }
 
 function Stop-StartupWorker {
-    if (-not (Test-Path $StartupPidFile)) { return }
-
-    $procId = (Get-Content $StartupPidFile -Raw).Trim()
-    if ($procId -notmatch '^\d+$') {
-        Remove-Item $StartupPidFile -Force -ErrorAction SilentlyContinue
+    if (-not (Test-Path -LiteralPath $StartupPidFile)) {
         return
     }
 
-    $process = Get-Process -Id ([int]$procId) -ErrorAction SilentlyContinue
+    $value = (Get-Content -LiteralPath $StartupPidFile -Raw).Trim()
+    if ($value -notmatch '^\d+$') {
+        Remove-Item -LiteralPath $StartupPidFile -Force -ErrorAction SilentlyContinue
+        return
+    }
+
+    $processId = [int]$value
+    $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
     if ($null -eq $process) {
-        Remove-Item $StartupPidFile -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $StartupPidFile -Force -ErrorAction SilentlyContinue
         return
     }
 
-    $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction SilentlyContinue
-    $commandLine = if ($null -ne $cim) { [string]$cim.CommandLine } else { '' }
-    $isWorker = $commandLine.IndexOf('start.ps1', [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
-        $commandLine.IndexOf('-Worker', [StringComparison]::OrdinalIgnoreCase) -ge 0
-
-    if (-not $isWorker) {
-        Write-Host "REFUSE startup PID $procId 身份不匹配，不终止" -ForegroundColor Red
-        Remove-Item $StartupPidFile -Force -ErrorAction SilentlyContinue
+    $commandLine = Get-ProcessCommandLine -ProcessId $processId
+    if (-not (Test-ExpectedCommand -Kind 'startup' -CommandLine $commandLine)) {
+        Write-Host "REFUSE startup PID $processId 无法确认为本项目启动任务" -ForegroundColor Red
+        Write-Host "       $commandLine" -ForegroundColor DarkYellow
+        Remove-Item -LiteralPath $StartupPidFile -Force -ErrorAction SilentlyContinue
         return
     }
 
-    Stop-ProcessTree -ProcessId ([int]$procId) -Name 'startup worker' -ForceStop:$true
-    Remove-Item $StartupPidFile -Force -ErrorAction SilentlyContinue
+    Stop-ProcessTree -ProcessId $processId -Name 'startup worker' -ForceStop
+    Remove-Item -LiteralPath $StartupPidFile -Force -ErrorAction SilentlyContinue
 }
 
-function Stop-TrackedProcess {
+function Stop-TrackedService {
     param(
+        [ValidateSet('backend', 'frontend')][string]$Kind,
         [string]$Name,
         [string]$PidFile,
         [string]$StartFile,
-        [string]$CommandMarker,
         [switch]$ForceStop
     )
 
-    if (-not (Test-Path $PidFile)) {
-        Write-Host "DISCOVER $Name 无 PID 文件，随后按端口检查" -ForegroundColor DarkGray
+    if (-not (Test-Path -LiteralPath $PidFile)) {
+        Write-Host "INFO  $Name 无 PID 文件，将按端口继续检查" -ForegroundColor DarkGray
         return
     }
 
-    $procId = (Get-Content $PidFile -Raw).Trim()
-    if ($procId -notmatch '^\d+$' -or -not (Test-Path $StartFile)) {
-        Write-Host "WARN $Name 跟踪文件无效，清理后按端口检查" -ForegroundColor Yellow
-        Remove-Tracking $PidFile $StartFile
+    $value = (Get-Content -LiteralPath $PidFile -Raw).Trim()
+    if ($value -notmatch '^\d+$') {
+        Write-Host "WARN  $Name PID 文件无效，将按端口继续检查" -ForegroundColor Yellow
+        Remove-TrackingFiles -PidFile $PidFile -StartFile $StartFile
         return
     }
 
-    $process = Get-Process -Id ([int]$procId) -ErrorAction SilentlyContinue
+    $processId = [int]$value
+    $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
     if ($null -eq $process) {
-        Write-Host "SKIP $Name PID $procId 不存在，清理跟踪文件" -ForegroundColor DarkGray
-        Remove-Tracking $PidFile $StartFile
+        Write-Host "INFO  $Name PID $processId 已不存在" -ForegroundColor DarkGray
+        Remove-TrackingFiles -PidFile $PidFile -StartFile $StartFile
         return
     }
 
-    $expectedStart = (Get-Content $StartFile -Raw).Trim()
-    $actualStart = $process.StartTime.ToUniversalTime().Ticks.ToString()
-    $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction SilentlyContinue
-    $commandLine = if ($null -ne $cim) { [string]$cim.CommandLine } else { '' }
-    $markerMatches = $commandLine.IndexOf($CommandMarker, [StringComparison]::OrdinalIgnoreCase) -ge 0
+    $startMatches = $true
+    if (Test-Path -LiteralPath $StartFile) {
+        $expectedStart = (Get-Content -LiteralPath $StartFile -Raw).Trim()
+        $actualStart = $process.StartTime.ToUniversalTime().Ticks.ToString()
+        $startMatches = ($expectedStart -eq $actualStart)
+    }
 
-    if ($expectedStart -ne $actualStart -or -not $markerMatches) {
-        Write-Host "WARN $Name PID $procId 身份不匹配，清理跟踪文件后按端口检查" -ForegroundColor Yellow
-        Remove-Tracking $PidFile $StartFile
+    $commandLine = Get-ProcessCommandLine -ProcessId $processId
+    $commandMatches = Test-ExpectedCommand -Kind $Kind -CommandLine $commandLine
+    if ((-not $startMatches) -or (-not $commandMatches)) {
+        Write-Host "WARN  $Name PID $processId 身份不匹配，将按端口继续检查" -ForegroundColor Yellow
+        Write-Host "      $commandLine" -ForegroundColor DarkYellow
+        Remove-TrackingFiles -PidFile $PidFile -StartFile $StartFile
         return
     }
 
-    Stop-ProcessTree -ProcessId ([int]$procId) -Name $Name -ForceStop:$ForceStop
-    Remove-Tracking $PidFile $StartFile
+    Stop-ProcessTree -ProcessId $processId -Name $Name -ForceStop:$ForceStop
+    Remove-TrackingFiles -PidFile $PidFile -StartFile $StartFile
 }
 
-function Test-DiscoveredCommand {
+function Stop-ServiceByPort {
     param(
-        [string]$Name,
-        [string]$CommandLine
-    )
-
-    if ([string]::IsNullOrWhiteSpace($CommandLine)) { return $false }
-
-    if ($Name -eq 'backend') {
-        return $CommandLine.IndexOf('app.main:app', [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
-            $CommandLine.IndexOf('uvicorn', [StringComparison]::OrdinalIgnoreCase) -ge 0
-    }
-
-    $viteScript = Join-Path $ProjectRoot 'frontend\node_modules\vite\bin\vite.js'
-    $hasVite = $CommandLine.IndexOf('vite', [StringComparison]::OrdinalIgnoreCase) -ge 0
-    $hasProjectPath = $CommandLine.IndexOf($ProjectRoot, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
-        $CommandLine.IndexOf($viteScript, [StringComparison]::OrdinalIgnoreCase) -ge 0
-    return $hasVite -and $hasProjectPath
-}
-
-function Stop-DiscoveredByPort {
-    param(
+        [ValidateSet('backend', 'frontend')][string]$Kind,
         [string]$Name,
         [int]$Port,
         [switch]$ForceStop
     )
 
-    $listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-    if ($null -eq $listeners) {
-        Write-Host "DOWN $Name 端口 $Port 未监听" -ForegroundColor DarkGray
+    $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+    if ($listeners.Count -eq 0) {
+        Write-Host "DOWN  $Name 端口 $Port 未监听" -ForegroundColor DarkGray
         return
     }
 
     $processIds = @($listeners | Select-Object -ExpandProperty OwningProcess -Unique)
-    foreach ($procId in $processIds) {
-        $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction SilentlyContinue
-        $commandLine = if ($null -ne $cim) { [string]$cim.CommandLine } else { '' }
-
-        if (-not (Test-DiscoveredCommand -Name $Name -CommandLine $commandLine)) {
-            Write-Host "REFUSE $Name 端口 $Port 的 PID $procId 无法确认为本项目进程" -ForegroundColor Red
-            Write-Host "命令行：$commandLine" -ForegroundColor DarkYellow
+    foreach ($processIdValue in $processIds) {
+        $processId = [int]$processIdValue
+        $commandLine = Get-ProcessCommandLine -ProcessId $processId
+        if (-not (Test-ExpectedCommand -Kind $Kind -CommandLine $commandLine)) {
+            Write-Host "REFUSE $Name 端口 $Port 的 PID $processId 无法确认为本项目进程" -ForegroundColor Red
+            Write-Host "       $commandLine" -ForegroundColor DarkYellow
             continue
         }
 
-        Write-Host "FOUND $Name 孤儿进程：port=$Port pid=$procId" -ForegroundColor Yellow
-        Stop-ProcessTree -ProcessId ([int]$procId) -Name $Name -ForceStop:$ForceStop
+        Write-Host "FOUND $Name 孤儿进程 port=$Port pid=$processId" -ForegroundColor Yellow
+        Stop-ProcessTree -ProcessId $processId -Name $Name -ForceStop:$ForceStop
     }
 }
 
+$ResolvedBackendPort = Resolve-ServicePort -ExplicitPort $BackendPort -PortFile $BackendPortFile -DefaultPort 8000
+$ResolvedFrontendPort = Resolve-ServicePort -ExplicitPort $FrontendPort -PortFile $FrontendPortFile -DefaultPort 5173
+
 Stop-StartupWorker
+Stop-TrackedService -Kind 'backend' -Name 'backend' -PidFile $BackendPidFile -StartFile $BackendStartFile -ForceStop:$Force
+Stop-TrackedService -Kind 'frontend' -Name 'frontend' -PidFile $FrontendPidFile -StartFile $FrontendStartFile -ForceStop:$Force
+Stop-ServiceByPort -Kind 'backend' -Name 'backend' -Port $ResolvedBackendPort -ForceStop:$Force
+Stop-ServiceByPort -Kind 'frontend' -Name 'frontend' -Port $ResolvedFrontendPort -ForceStop:$Force
 
-Stop-TrackedProcess -Name 'backend' `
-    -PidFile $BackendPidFile `
-    -StartFile $BackendStartFile `
-    -CommandMarker 'app.main:app' `
-    -ForceStop:$Force
-Stop-TrackedProcess -Name 'frontend' `
-    -PidFile $FrontendPidFile `
-    -StartFile $FrontendStartFile `
-    -CommandMarker 'vite' `
-    -ForceStop:$Force
+Remove-TrackingFiles -PidFile $BackendPidFile -StartFile $BackendStartFile
+Remove-TrackingFiles -PidFile $FrontendPidFile -StartFile $FrontendStartFile
 
-Stop-DiscoveredByPort -Name 'backend' -Port $ResolvedBackendPort -ForceStop:$Force
-Stop-DiscoveredByPort -Name 'frontend' -Port $ResolvedFrontendPort -ForceStop:$Force
+$backendListeners = @(Get-NetTCPConnection -LocalPort $ResolvedBackendPort -State Listen -ErrorAction SilentlyContinue)
+$frontendListeners = @(Get-NetTCPConnection -LocalPort $ResolvedFrontendPort -State Listen -ErrorAction SilentlyContinue)
 
-Remove-Tracking $BackendPidFile $BackendStartFile
-Remove-Tracking $FrontendPidFile $FrontendStartFile
-
-$backendStillListening = Get-NetTCPConnection `
-    -LocalPort $ResolvedBackendPort `
-    -State Listen `
-    -ErrorAction SilentlyContinue
-$frontendStillListening = Get-NetTCPConnection `
-    -LocalPort $ResolvedFrontendPort `
-    -State Listen `
-    -ErrorAction SilentlyContinue
-
-if ($null -eq $backendStillListening) {
-    Remove-Item $BackendPortFile -Force -ErrorAction SilentlyContinue
+if ($backendListeners.Count -eq 0) {
+    Remove-Item -LiteralPath $BackendPortFile -Force -ErrorAction SilentlyContinue
 }
-if ($null -eq $frontendStillListening) {
-    Remove-Item $FrontendPortFile -Force -ErrorAction SilentlyContinue
+if ($frontendListeners.Count -eq 0) {
+    Remove-Item -LiteralPath $FrontendPortFile -Force -ErrorAction SilentlyContinue
 }
 
-if ($null -ne $backendStillListening -or $null -ne $frontendStillListening) {
-    Write-Host 'DONE 已停止可确认的本项目进程，但仍有无法确认的端口占用，详见上方 REFUSE。' -ForegroundColor Yellow
+$hasRemainingListener = (($backendListeners.Count -gt 0) -or ($frontendListeners.Count -gt 0))
+if ($hasRemainingListener) {
+    Write-Host 'DONE  已停止可确认的本项目进程，但仍有无法确认的端口占用。' -ForegroundColor Yellow
     exit 1
 }
 
-Write-Host 'DONE 后端和前端均已停止，端口已释放' -ForegroundColor Green
+Write-Host 'DONE  后端和前端均已停止，端口已释放' -ForegroundColor Green
