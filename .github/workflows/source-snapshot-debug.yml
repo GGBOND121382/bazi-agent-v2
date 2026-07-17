@@ -1,6 +1,8 @@
 name: Apply temporal audit patch
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [agent/mobile-ui-deterministic-chat]
 
@@ -9,7 +11,7 @@ permissions:
 
 jobs:
   apply:
-    if: github.event.head_commit.message != 'feat: correct exact temporal and shensha calculations'
+    if: github.event_name == 'pull_request' || github.event.head_commit.message != 'feat: correct exact temporal and shensha calculations'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
