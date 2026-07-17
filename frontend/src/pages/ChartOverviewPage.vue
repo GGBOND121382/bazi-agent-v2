@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useQuery } from '@tanstack/vue-query'
+import chartOverviewMock from '@contracts/examples/chart_overview.mock.json'
 import { ApiError, useBaziClient } from '@/api'
 import type {
   ChartOverviewViewDTO,
@@ -35,8 +36,10 @@ const { data, error, isLoading, isError, isFetching, refetch } = useQuery<{
   queryKey: computed(() => ['chart-overview-full', props.chartId]),
   queryFn: async () => {
     if (useMocks) {
-      const response = await fetch(new URL('@contracts/examples/chart_overview.mock.json', import.meta.url).href)
-      return { overview: (await response.json()) as ChartOverviewViewDTO, chart: null }
+      return {
+        overview: chartOverviewMock as unknown as ChartOverviewViewDTO,
+        chart: null,
+      }
     }
     const [overview, chart] = await Promise.all([
       client.getChartOverviewView(props.chartId),
