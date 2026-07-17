@@ -1,5 +1,5 @@
 <#
-start.ps1 - Start backend and frontend without occupying the caller terminal.
+start.ps1 - Start the backend and frontend on Windows.
 
 Usage:
     .\start.ps1
@@ -7,8 +7,8 @@ Usage:
     .\start.ps1 -Wait
     .\start.ps1 -BackendPort 9000 -FrontendPort 5174
 
-Default mode starts a hidden worker and redirects stdin, stdout, and stderr.
-The caller terminal is released immediately. Use -Wait for foreground diagnostics.
+Default mode performs lightweight preflight checks, starts a detached worker, and
+returns the caller terminal immediately. Use -Wait for foreground diagnostics.
 Compatible with Windows PowerShell 5.1.
 #>
 
@@ -25,6 +25,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = $PSScriptRoot
 $RuntimeDir = Join-Path $ProjectRoot '.runtime'
+$BackendDir = Join-Path $ProjectRoot 'backend'
+$FrontendDir = Join-Path $ProjectRoot 'frontend'
+
 $BackendPidFile = Join-Path $RuntimeDir 'backend.pid'
 $FrontendPidFile = Join-Path $RuntimeDir 'frontend.pid'
 $BackendStartFile = Join-Path $RuntimeDir 'backend.start'
@@ -32,20 +35,61 @@ $FrontendStartFile = Join-Path $RuntimeDir 'frontend.start'
 $BackendPortFile = Join-Path $RuntimeDir 'backend.port'
 $FrontendPortFile = Join-Path $RuntimeDir 'frontend.port'
 $StartupPidFile = Join-Path $RuntimeDir 'startup.pid'
+$StartupStateFile = Join-Path $RuntimeDir 'startup.state'
+$StartupMessageFile = Join-Path $RuntimeDir 'startup.message'
+
 $StartupOutLog = Join-Path $RuntimeDir 'startup.out.log'
 $StartupErrLog = Join-Path $RuntimeDir 'startup.err.log'
 $BackendLog = Join-Path $RuntimeDir 'backend.out.log'
 $BackendErr = Join-Path $RuntimeDir 'backend.err.log'
 $FrontendLog = Join-Path $RuntimeDir 'frontend.out.log'
 $FrontendErr = Join-Path $RuntimeDir 'frontend.err.log'
-$NullInputFile = Join-Path $RuntimeDir 'detached.stdin'
+
+$WorkerInputFile = Join-Path $RuntimeDir 'worker.stdin'
+$BackendInputFile = Join-Path $RuntimeDir 'backend.stdin'
+$FrontendInputFile = Join-Path $RuntimeDir 'frontend.stdin'
 
 if (-not (Test-Path -LiteralPath $RuntimeDir)) {
     New-Item -ItemType Directory -Path $RuntimeDir | Out-Null
 }
 
-function Initialize-NullInputFile {
-    Set-Content -LiteralPath $NullInputFile -Value '' -Encoding Ascii -NoNewline
+function Set-StartupState {
+    param(
+        [ValidateSet('starting', 'running', 'failed')][string]$State,
+        [string]$Message = ''
+    )
+
+    Set-Content -LiteralPath $StartupStateFile -Value $State -Encoding Ascii -NoNewline
+    Set-Content -LiteralPath $StartupMessageFile -Value $Message -Encoding UTF8 -NoNewline
+}
+
+function Get-StartupState {
+    if (-not (Test-Path -LiteralPath $StartupStateFile)) {
+        return ''
+    }
+    return (Get-Content -LiteralPath $StartupStateFile -Raw).Trim()
+}
+
+function Get-StartupMessage {
+    if (-not (Test-Path -LiteralPath $StartupMessageFile)) {
+        return ''
+    }
+    return (Get-Content -LiteralPath $StartupMessageFile -Raw).Trim()
+}
+
+function Reset-DetachedInputFiles {
+    foreach ($path in @($WorkerInputFile, $BackendInputFile, $FrontendInputFile)) {
+        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        Set-Content -LiteralPath $path -Value '' -Encoding Ascii -NoNewline
+    }
+}
+
+function Ensure-DetachedInputFiles {
+    foreach ($path in @($WorkerInputFile, $BackendInputFile, $FrontendInputFile)) {
+        if (-not (Test-Path -LiteralPath $path)) {
+            Set-Content -LiteralPath $path -Value '' -Encoding Ascii -NoNewline
+        }
+    }
 }
 
 function Get-TrackedProcess {
@@ -97,16 +141,96 @@ function Assert-PortsAvailable {
         throw 'Backend and frontend ports must be different.'
     }
 
-    $checks = @(
+    foreach ($item in @(
         [PSCustomObject]@{ Name = 'backend'; Port = $BackendPort },
         [PSCustomObject]@{ Name = 'frontend'; Port = $FrontendPort }
-    )
-
-    foreach ($item in $checks) {
+    )) {
         $owner = Get-PortOwner -Port $item.Port
         if ($null -ne $owner) {
             $message = "{0} port {1} is already in use: PID={2}, process={3}`nCommand line: {4}`nRun .\stop.ps1 first or choose another port." -f $item.Name, $item.Port, $owner.Pid, $owner.Name, $owner.CommandLine
             throw $message
+        }
+    }
+}
+
+function Assert-NoTrackedProcesses {
+    $startup = Get-TrackedProcess -PidFile $StartupPidFile
+    if ($null -ne $startup) {
+        throw "A startup worker is already running, PID=$($startup.Id). Run .\status.ps1."
+    }
+
+    $backend = Get-TrackedProcess -PidFile $BackendPidFile
+    if ($null -ne $backend) {
+        throw "Backend is already running, PID=$($backend.Id). Run .\stop.ps1 first."
+    }
+
+    $frontend = Get-TrackedProcess -PidFile $FrontendPidFile
+    if ($null -ne $frontend) {
+        throw "Frontend is already running, PID=$($frontend.Id). Run .\stop.ps1 first."
+    }
+}
+
+function Resolve-Python312 {
+    $python = ''
+
+    $pyCommand = Get-Command py.exe -ErrorAction SilentlyContinue
+    if ($null -ne $pyCommand) {
+        $output = & $pyCommand.Source -3.12 -c "import sys; print(sys.executable)" 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $python = (@($output) | Select-Object -Last 1).Trim()
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($python)) {
+        $pythonCommand = Get-Command python.exe -ErrorAction SilentlyContinue
+        if ($null -ne $pythonCommand) {
+            $candidate = $pythonCommand.Source
+            $version = & $candidate -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+            if (($LASTEXITCODE -eq 0) -and (($version | Select-Object -Last 1).Trim() -eq '3.12')) {
+                $python = $candidate
+            }
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($python)) {
+        throw 'Python 3.12 was not found. Install it or expose it through py.exe/python.exe.'
+    }
+    if (-not (Test-Path -LiteralPath $python)) {
+        throw "Python 3.12 executable does not exist: $python"
+    }
+
+    return $python
+}
+
+function Resolve-DeepSeekKey {
+    if (-not [string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY)) {
+        return $env:DEEPSEEK_API_KEY.Trim()
+    }
+
+    $candidates = @(
+        (Join-Path $ProjectRoot 'deepseek-apikey'),
+        (Join-Path (Split-Path $ProjectRoot -Parent) 'deepseek-apikey')
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            $value = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $candidate)).Trim()
+            if (-not [string]::IsNullOrWhiteSpace($value)) {
+                return $value
+            }
+        }
+    }
+
+    throw "DeepSeek key was not found. Set DEEPSEEK_API_KEY or create 'deepseek-apikey' in the project directory or its parent. Use -Mock for mock mode."
+}
+
+function Assert-ApplicationConfiguration {
+    [void](Resolve-Python312)
+
+    if (-not $Mock) {
+        [void](Resolve-DeepSeekKey)
+        $ragDb = Join-Path $ProjectRoot 'data\bazi_rag_dataset_v2_1\import\sqlite\bazi_rag.sqlite'
+        if (-not (Test-Path -LiteralPath $ragDb)) {
+            throw "RAG SQLite database does not exist: $ragDb. Use -Mock only for UI testing."
         }
     }
 }
@@ -130,120 +254,13 @@ function Wait-HttpReady {
         Start-Sleep -Milliseconds 300
     }
 
-    Write-Host "TIMEOUT $Description was not ready within $TimeoutSeconds seconds: $Uri" -ForegroundColor Red
-    return $false
-}
-
-function Find-PowerShellExecutable {
-    $currentProcess = Get-Process -Id $PID -ErrorAction SilentlyContinue
-    if ($null -ne $currentProcess) {
-        if (-not [string]::IsNullOrWhiteSpace($currentProcess.Path)) {
-            return $currentProcess.Path
-        }
-    }
-
-    $windowsPowerShell = Join-Path $PSHOME 'powershell.exe'
-    if (Test-Path -LiteralPath $windowsPowerShell) {
-        return $windowsPowerShell
-    }
-
-    $powerShellCore = Join-Path $PSHOME 'pwsh.exe'
-    if (Test-Path -LiteralPath $powerShellCore) {
-        return $powerShellCore
-    }
-
-    throw 'Unable to locate a PowerShell executable.'
-}
-
-function Start-DetachedWorker {
-    $startupProcess = Get-TrackedProcess -PidFile $StartupPidFile
-    if ($null -ne $startupProcess) {
-        throw "A startup worker is already running, PID=$($startupProcess.Id). Run .\status.ps1."
-    }
-    Remove-Item -LiteralPath $StartupPidFile -Force -ErrorAction SilentlyContinue
-
-    $backendProcess = Get-TrackedProcess -PidFile $BackendPidFile
-    $frontendProcess = Get-TrackedProcess -PidFile $FrontendPidFile
-    if ($null -ne $backendProcess) {
-        throw 'Backend is already running. Run .\stop.ps1 first.'
-    }
-    if ($null -ne $frontendProcess) {
-        throw 'Frontend is already running. Run .\stop.ps1 first.'
-    }
-
-    Assert-PortsAvailable
-    Initialize-NullInputFile
-    Remove-Item -LiteralPath $StartupOutLog -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $StartupErrLog -Force -ErrorAction SilentlyContinue
-
-    $powerShellExe = Find-PowerShellExecutable
-    $quotedScriptPath = '"{0}"' -f $PSCommandPath
-    $arguments = @(
-        '-NoProfile',
-        '-NonInteractive',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', $quotedScriptPath,
-        '-Worker',
-        '-BackendPort', [string]$BackendPort,
-        '-FrontendPort', [string]$FrontendPort
-    )
-    if ($SkipInstall) {
-        $arguments += '-SkipInstall'
-    }
-    if ($Mock) {
-        $arguments += '-Mock'
-    }
-
-    $startup = Start-Process `
-        -FilePath $powerShellExe `
-        -ArgumentList $arguments `
-        -WorkingDirectory $ProjectRoot `
-        -RedirectStandardInput $NullInputFile `
-        -RedirectStandardOutput $StartupOutLog `
-        -RedirectStandardError $StartupErrLog `
-        -WindowStyle Hidden `
-        -PassThru
-
-    $startup.Id | Set-Content -LiteralPath $StartupPidFile -NoNewline
-
-    Start-Sleep -Milliseconds 350
-    if ($startup.HasExited) {
-        $details = ''
-        if (Test-Path -LiteralPath $StartupErrLog) {
-            $details = @(Get-Content -LiteralPath $StartupErrLog -Tail 30 -ErrorAction SilentlyContinue) -join "`n"
-        }
-        throw "The background startup worker exited immediately.`n$details"
-    }
-
-    Write-Host "START Background startup submitted, PID=$($startup.Id). The current terminal is free." -ForegroundColor Green
-    Write-Host 'STATUS .\status.ps1' -ForegroundColor Cyan
-    Write-Host "LOG    Get-Content '$StartupOutLog' -Wait" -ForegroundColor Cyan
-    Write-Host "ERROR  Get-Content '$StartupErrLog' -Wait" -ForegroundColor Cyan
-}
-
-function Resolve-Python312 {
-    $pythonOutput = & py.exe -3.12 -c "import sys; print(sys.executable)" 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Python 3.12 was not found through py.exe.'
-    }
-
-    $python = (@($pythonOutput) | Select-Object -Last 1).Trim()
-    if ([string]::IsNullOrWhiteSpace($python)) {
-        throw 'Unable to resolve the Python 3.12 executable path.'
-    }
-    if (-not (Test-Path -LiteralPath $python)) {
-        throw "Python 3.12 executable does not exist: $python"
-    }
-
-    return $python
+    throw "$Description was not ready within $TimeoutSeconds seconds: $Uri"
 }
 
 function Start-Backend {
     param([string]$Python)
 
-    $backendDir = Join-Path $ProjectRoot 'backend'
-    Set-Location $backendDir
-
+    Set-Location $BackendDir
     & $Python -c "import fastapi, uvicorn, app" 2>$null
     $dependenciesReady = ($LASTEXITCODE -eq 0)
     if ((-not $dependenciesReady) -and $SkipInstall) {
@@ -257,30 +274,14 @@ function Start-Backend {
         }
     }
 
-    $keyFile = Join-Path (Split-Path $ProjectRoot -Parent) 'deepseek-apikey'
     $previousKey = $env:DEEPSEEK_API_KEY
     $hadPreviousKey = Test-Path Env:DEEPSEEK_API_KEY
-
     if (-not $Mock) {
-        if (-not (Test-Path -LiteralPath $keyFile)) {
-            throw 'DeepSeek key file was not found. Use -Mock for mock mode.'
-        }
-
-        $resolvedKeyFile = Resolve-Path -LiteralPath $keyFile
-        $env:DEEPSEEK_API_KEY = [IO.File]::ReadAllText($resolvedKeyFile).Trim()
-        if ([string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY)) {
-            throw 'DeepSeek key file is empty.'
-        }
-
-        $ragDb = Join-Path $ProjectRoot 'data\bazi_rag_dataset_v2_1\import\sqlite\bazi_rag.sqlite'
-        if (-not (Test-Path -LiteralPath $ragDb)) {
-            throw "RAG SQLite database does not exist: $ragDb"
-        }
+        $env:DEEPSEEK_API_KEY = Resolve-DeepSeekKey
     }
 
-    Write-Host "START backend uvicorn (port $BackendPort)..." -ForegroundColor Green
     try {
-        $quotedBackendDir = '"{0}"' -f $backendDir
+        $quotedBackendDir = '"{0}"' -f $BackendDir
         $arguments = @(
             '-m', 'uvicorn', 'app.main:app',
             '--app-dir', $quotedBackendDir,
@@ -288,12 +289,11 @@ function Start-Backend {
             '--port', [string]$BackendPort,
             '--log-level', 'info'
         )
-
         $process = Start-Process `
             -FilePath $Python `
             -ArgumentList $arguments `
-            -WorkingDirectory $backendDir `
-            -RedirectStandardInput $NullInputFile `
+            -WorkingDirectory $BackendDir `
+            -RedirectStandardInput $BackendInputFile `
             -RedirectStandardOutput $BackendLog `
             -RedirectStandardError $BackendErr `
             -WindowStyle Hidden `
@@ -312,8 +312,7 @@ function Start-Backend {
 }
 
 function Start-Frontend {
-    $frontendDir = Join-Path $ProjectRoot 'frontend'
-    Set-Location $frontendDir
+    Set-Location $FrontendDir
 
     $nodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue
     $npmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue
@@ -321,13 +320,13 @@ function Start-Frontend {
         throw 'Node.js or npm was not found.'
     }
 
-    $viteScript = Join-Path $frontendDir 'node_modules\vite\bin\vite.js'
+    $viteScript = Join-Path $FrontendDir 'node_modules\vite\bin\vite.js'
     if (-not (Test-Path -LiteralPath $viteScript)) {
         if ($SkipInstall) {
             throw 'Frontend dependencies are missing and -SkipInstall was specified.'
         }
         Write-Host 'SETUP Installing frontend dependencies...' -ForegroundColor Cyan
-        & npm.cmd install --prefer-offline --no-audit --no-fund --no-progress
+        & $npmCommand.Source install --prefer-offline --no-audit --no-fund --no-progress
         if ($LASTEXITCODE -ne 0) {
             throw 'Frontend dependency installation failed.'
         }
@@ -345,7 +344,6 @@ function Start-Frontend {
     }
     $env:VITE_API_TARGET = "http://127.0.0.1:$BackendPort"
 
-    Write-Host "START frontend Vite (port $FrontendPort)..." -ForegroundColor Green
     try {
         $quotedViteScript = '"{0}"' -f $viteScript
         $arguments = @(
@@ -353,12 +351,11 @@ function Start-Frontend {
             '--host', '127.0.0.1',
             '--port', [string]$FrontendPort
         )
-
         $process = Start-Process `
             -FilePath $nodeCommand.Source `
             -ArgumentList $arguments `
-            -WorkingDirectory $frontendDir `
-            -RedirectStandardInput $NullInputFile `
+            -WorkingDirectory $FrontendDir `
+            -RedirectStandardInput $FrontendInputFile `
             -RedirectStandardOutput $FrontendLog `
             -RedirectStandardError $FrontendErr `
             -WindowStyle Hidden `
@@ -381,82 +378,177 @@ function Start-Frontend {
     return $process
 }
 
-function Invoke-StartWorker {
-    Set-Location $ProjectRoot
-    Initialize-NullInputFile
-
-    $backendProcess = Get-TrackedProcess -PidFile $BackendPidFile
-    $frontendProcess = Get-TrackedProcess -PidFile $FrontendPidFile
-    if ($null -ne $backendProcess) {
-        throw 'Backend is already running. Run .\stop.ps1 first.'
-    }
-    if ($null -ne $frontendProcess) {
-        throw 'Frontend is already running. Run .\stop.ps1 first.'
+function Stop-StartedServices {
+    foreach ($pidFile in @($FrontendPidFile, $BackendPidFile)) {
+        if (-not (Test-Path -LiteralPath $pidFile)) {
+            continue
+        }
+        $value = (Get-Content -LiteralPath $pidFile -Raw).Trim()
+        if ($value -match '^\d+$') {
+            & taskkill.exe /F /T /PID ([int]$value) 2>&1 | Out-Null
+        }
     }
 
-    Assert-PortsAvailable
-    $BackendPort | Set-Content -LiteralPath $BackendPortFile -NoNewline
-    $FrontendPort | Set-Content -LiteralPath $FrontendPortFile -NoNewline
-
-    $python = Resolve-Python312
-    $backend = Start-Backend -Python $python
-    $frontend = Start-Frontend
-
-    Write-Host 'HEALTH Waiting for backend...' -ForegroundColor Cyan
-    $backendReady = Wait-HttpReady `
-        -Uri "http://127.0.0.1:$BackendPort/api/v1/health" `
-        -TimeoutSeconds 20 `
-        -Description 'backend'
-    if (-not $backendReady) {
-        throw "Backend did not become ready. Logs: $BackendLog / $BackendErr"
-    }
-
-    Write-Host 'HEALTH Waiting for frontend and API proxy...' -ForegroundColor Cyan
-    $frontendReady = Wait-HttpReady `
-        -Uri "http://127.0.0.1:$FrontendPort/" `
-        -TimeoutSeconds 20 `
-        -Description 'frontend page'
-    $proxyReady = Wait-HttpReady `
-        -Uri "http://127.0.0.1:$FrontendPort/api/v1/health" `
-        -TimeoutSeconds 10 `
-        -Description 'frontend API proxy'
-    if ((-not $frontendReady) -or (-not $proxyReady)) {
-        throw "Frontend or API proxy did not become ready. Logs: $FrontendLog / $FrontendErr"
-    }
-
-    Write-Host "OK    backend http://127.0.0.1:$BackendPort (pid $($backend.Id))" -ForegroundColor Green
-    Write-Host "OK    frontend http://127.0.0.1:$FrontendPort (pid $($frontend.Id))" -ForegroundColor Green
-    Write-Host 'STOP  .\stop.ps1' -ForegroundColor Cyan
+    Remove-Item -LiteralPath $BackendPidFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $FrontendPidFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $BackendStartFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $FrontendStartFile -Force -ErrorAction SilentlyContinue
 }
 
-if ((-not $Worker) -and (-not $Wait)) {
+function Invoke-StartupWorker {
+    $exitCode = 0
+    Set-StartupState -State 'starting' -Message 'Startup checks are running.'
+
     try {
-        Start-DetachedWorker
-        exit 0
+        Ensure-DetachedInputFiles
+        Assert-NoTrackedProcesses
+        Assert-PortsAvailable
+        Assert-ApplicationConfiguration
+
+        $BackendPort | Set-Content -LiteralPath $BackendPortFile -NoNewline
+        $FrontendPort | Set-Content -LiteralPath $FrontendPortFile -NoNewline
+
+        $python = Resolve-Python312
+        Write-Host "START backend on http://127.0.0.1:$BackendPort" -ForegroundColor Green
+        $backend = Start-Backend -Python $python
+        Write-Host "START frontend on http://127.0.0.1:$FrontendPort" -ForegroundColor Green
+        $frontend = Start-Frontend
+
+        [void](Wait-HttpReady -Uri "http://127.0.0.1:$BackendPort/api/v1/health" -TimeoutSeconds 25 -Description 'Backend')
+        [void](Wait-HttpReady -Uri "http://127.0.0.1:$FrontendPort/" -TimeoutSeconds 25 -Description 'Frontend')
+        [void](Wait-HttpReady -Uri "http://127.0.0.1:$FrontendPort/api/v1/health" -TimeoutSeconds 10 -Description 'Frontend API proxy')
+
+        $message = "Backend PID=$($backend.Id); frontend PID=$($frontend.Id)."
+        Set-StartupState -State 'running' -Message $message
+        Write-Host "OK $message" -ForegroundColor Green
+    } catch {
+        $exitCode = 1
+        $message = $_.Exception.Message
+        Set-StartupState -State 'failed' -Message $message
+        Write-Host "ERROR: $message" -ForegroundColor Red
+        Stop-StartedServices
+    } finally {
+        if ($Worker) {
+            Remove-Item -LiteralPath $StartupPidFile -Force -ErrorAction SilentlyContinue
+        }
+        Set-Location $ProjectRoot
+    }
+
+    return $exitCode
+}
+
+function Find-PowerShellExecutable {
+    $current = Get-Process -Id $PID -ErrorAction SilentlyContinue
+    if ($null -ne $current) {
+        if (-not [string]::IsNullOrWhiteSpace($current.Path)) {
+            return $current.Path
+        }
+    }
+
+    foreach ($candidate in @(
+        (Join-Path $PSHOME 'powershell.exe'),
+        (Join-Path $PSHOME 'pwsh.exe')
+    )) {
+        if (Test-Path -LiteralPath $candidate) {
+            return $candidate
+        }
+    }
+
+    throw 'Unable to locate a PowerShell executable.'
+}
+
+function Start-DetachedWorker {
+    Assert-NoTrackedProcesses
+    Assert-PortsAvailable
+    Assert-ApplicationConfiguration
+
+    Reset-DetachedInputFiles
+    Remove-Item -LiteralPath $StartupOutLog -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $StartupErrLog -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $StartupStateFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $StartupMessageFile -Force -ErrorAction SilentlyContinue
+    Set-StartupState -State 'starting' -Message 'Detached startup worker has been submitted.'
+
+    $powerShellExe = Find-PowerShellExecutable
+    $arguments = @(
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', ('"{0}"' -f $PSCommandPath),
+        '-Worker',
+        '-BackendPort', [string]$BackendPort,
+        '-FrontendPort', [string]$FrontendPort
+    )
+    if ($SkipInstall) {
+        $arguments += '-SkipInstall'
+    }
+    if ($Mock) {
+        $arguments += '-Mock'
+    }
+
+    $startup = Start-Process `
+        -FilePath $powerShellExe `
+        -ArgumentList $arguments `
+        -WorkingDirectory $ProjectRoot `
+        -RedirectStandardInput $WorkerInputFile `
+        -RedirectStandardOutput $StartupOutLog `
+        -RedirectStandardError $StartupErrLog `
+        -WindowStyle Hidden `
+        -PassThru
+
+    $startup.Id | Set-Content -LiteralPath $StartupPidFile -NoNewline
+
+    $deadline = (Get-Date).AddSeconds(3)
+    while ((Get-Date) -lt $deadline) {
+        $state = Get-StartupState
+        if ($state -eq 'running') {
+            Write-Host "OK    $(Get-StartupMessage)" -ForegroundColor Green
+            Write-Host "OPEN  http://127.0.0.1:$FrontendPort" -ForegroundColor Cyan
+            return
+        }
+        if ($state -eq 'failed') {
+            throw (Get-StartupMessage)
+        }
+        if ($startup.HasExited) {
+            $message = Get-StartupMessage
+            if ([string]::IsNullOrWhiteSpace($message)) {
+                $message = 'The detached startup worker exited before reporting a state.'
+            }
+            throw $message
+        }
+        Start-Sleep -Milliseconds 150
+    }
+
+    Write-Host "START Background startup submitted, PID=$($startup.Id)." -ForegroundColor Green
+    Write-Host 'STATUS .\status.ps1' -ForegroundColor Cyan
+    Write-Host "LOG    Get-Content '$StartupOutLog' -Wait" -ForegroundColor Cyan
+}
+
+if ($Worker) {
+    $code = Invoke-StartupWorker
+    exit $code
+}
+
+if ($Wait) {
+    try {
+        Assert-NoTrackedProcesses
+        Assert-PortsAvailable
+        Assert-ApplicationConfiguration
+        Reset-DetachedInputFiles
+        Remove-Item -LiteralPath $StartupOutLog -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $StartupErrLog -Force -ErrorAction SilentlyContinue
+        $code = Invoke-StartupWorker
+        exit $code
     } catch {
         Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
         exit 1
     }
 }
 
-$exitCode = 0
 try {
-    Invoke-StartWorker
+    Start-DetachedWorker
+    exit 0
 } catch {
-    $exitCode = 1
     Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
-    try {
-        & (Join-Path $ProjectRoot 'stop.ps1') `
-            -Force `
-            -BackendPort $BackendPort `
-            -FrontendPort $FrontendPort
-    } catch {
-    }
-} finally {
-    if ($Worker) {
-        Remove-Item -LiteralPath $StartupPidFile -Force -ErrorAction SilentlyContinue
-    }
-    Set-Location $ProjectRoot
+    exit 1
 }
-
-exit $exitCode
