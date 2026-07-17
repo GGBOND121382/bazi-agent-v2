@@ -10,6 +10,7 @@ import json
 import re
 import uuid
 from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
 from typing import Any, cast
 
 from ...api.dto import ChartResultDTO, FactDTO, StructuredAnalysisDTO, ValidationResultDTO
@@ -70,6 +71,74 @@ def _deterministic_temporal_items(chart: ChartResultDTO) -> tuple[dict[str, Any]
     return tuple(items)
 
 
+@dataclass(frozen=True, slots=True)
+class _ReferenceIndexes:
+    fact_index: dict[str, FactDTO]
+    relation_fact_index: dict[str, dict[str, Any]]
+    temporal_fact_index: dict[str, dict[str, Any]]
+    temporal_rule_index: dict[str, list[dict[str, Any]]]
+    shensha_rule_index: dict[str, list[dict[str, Any]]]
+    evidence_index: dict[str, RetrievedEvidence]
+    known_fact_ids: set[str]
+    known_rules: set[str]
+    authoritative_rules: set[str]
+
+
+def _append_rule_item(
+    index: dict[str, list[dict[str, Any]]], item: dict[str, Any]
+) -> None:
+    rule_id = str(item.get("rule_id", ""))
+    if rule_id:
+        index.setdefault(rule_id, []).append(item)
+
+
+def _build_reference_indexes(
+    *,
+    chart: ChartResultDTO,
+    evidence: Iterable[RetrievedEvidence],
+    relation_items: tuple[dict[str, Any], ...],
+) -> _ReferenceIndexes:
+    shensha_rule_index: dict[str, list[dict[str, Any]]] = {}
+    for item in _deterministic_shensha(chart):
+        _append_rule_item(shensha_rule_index, item)
+
+    temporal_items = _deterministic_temporal_items(chart)
+    temporal_fact_index = {
+        str(item["fact_id"]): item for item in temporal_items if item.get("fact_id")
+    }
+    temporal_rule_index: dict[str, list[dict[str, Any]]] = {}
+    for item in temporal_items:
+        _append_rule_item(temporal_rule_index, item)
+
+    fact_index = {fact.fact_id: fact for fact in chart.facts}
+    relation_fact_index = {
+        str(item["fact_id"]): item for item in relation_items if "fact_id" in item
+    }
+    evidence_index = {item.chunk_id: item for item in evidence}
+    chart_rules = (
+        {fact.rule_id for fact in chart.facts}
+        | {str(item["rule_id"]) for item in relation_items if "rule_id" in item}
+        | set(temporal_rule_index)
+        | set(shensha_rule_index)
+    )
+    authoritative_evidence = {
+        item.chunk_id
+        for item in evidence_index.values()
+        if item.can_support_claim and item.trust_tier in {"A", "B"}
+    }
+    return _ReferenceIndexes(
+        fact_index=fact_index,
+        relation_fact_index=relation_fact_index,
+        temporal_fact_index=temporal_fact_index,
+        temporal_rule_index=temporal_rule_index,
+        shensha_rule_index=shensha_rule_index,
+        evidence_index=evidence_index,
+        known_fact_ids=set(fact_index) | set(relation_fact_index) | set(temporal_fact_index),
+        known_rules=chart_rules | set(evidence_index),
+        authoritative_rules=chart_rules | authoritative_evidence,
+    )
+
+
 def _referenced_text(
     *,
     fact_ids: Iterable[str],
@@ -124,42 +193,9 @@ def verify_analysis(
     computed_relations: Iterable[dict[str, Any]] = (),
 ) -> ValidationResultDTO:
     relation_items = tuple(computed_relations)
-    shensha_items = _deterministic_shensha(chart)
-    temporal_items = _deterministic_temporal_items(chart)
-
-    shensha_rule_index: dict[str, list[dict[str, Any]]] = {}
-    for item in shensha_items:
-        rule_id = str(item.get("rule_id", ""))
-        if rule_id:
-            shensha_rule_index.setdefault(rule_id, []).append(item)
-
-    temporal_fact_index = {
-        str(item["fact_id"]): item for item in temporal_items if item.get("fact_id")
-    }
-    temporal_rule_index: dict[str, list[dict[str, Any]]] = {}
-    for item in temporal_items:
-        rule_id = str(item.get("rule_id", ""))
-        if rule_id:
-            temporal_rule_index.setdefault(rule_id, []).append(item)
-
-    fact_index = {fact.fact_id: fact for fact in chart.facts}
-    relation_fact_index = {
-        str(item["fact_id"]): item for item in relation_items if "fact_id" in item
-    }
-    evidence_index = {item.chunk_id: item for item in evidence}
-    chart_rules = (
-        {fact.rule_id for fact in chart.facts}
-        | {str(item["rule_id"]) for item in relation_items if "rule_id" in item}
-        | set(temporal_rule_index)
-        | set(shensha_rule_index)
+    indexes = _build_reference_indexes(
+        chart=chart, evidence=evidence, relation_items=relation_items
     )
-    known_rules = chart_rules | set(evidence_index)
-    authoritative_rules = chart_rules | {
-        item.chunk_id
-        for item in evidence_index.values()
-        if item.can_support_claim and item.trust_tier in {"A", "B"}
-    }
-    known_fact_ids = set(fact_index) | set(relation_fact_index) | set(temporal_fact_index)
     errors: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     approved: list[str] = []
@@ -173,10 +209,14 @@ def verify_analysis(
 
     for claim in analysis.claims:
         before = len(errors)
-        missing_facts = sorted(set(claim.fact_ids) - known_fact_ids)
-        missing_rules = sorted(set(claim.rule_ids) - known_rules)
-        non_authoritative_rules = sorted(set(claim.rule_ids) - authoritative_rules)
-        missing_evidence = sorted(set(claim.evidence_ids) - set(evidence_index))
+        missing_facts = sorted(set(claim.fact_ids) - indexes.known_fact_ids)
+        missing_rules = sorted(set(claim.rule_ids) - indexes.known_rules)
+        non_authoritative_rules = sorted(
+            set(claim.rule_ids) - indexes.authoritative_rules
+        )
+        missing_evidence = sorted(
+            set(claim.evidence_ids) - set(indexes.evidence_index)
+        )
         if missing_facts:
             errors.append(_error("UNKNOWN_FACT", claim.claim_id, ",".join(missing_facts)))
         if missing_rules:
@@ -213,12 +253,12 @@ def verify_analysis(
             fact_ids=claim.fact_ids,
             rule_ids=claim.rule_ids,
             evidence_ids=claim.evidence_ids,
-            fact_index=fact_index,
-            relation_fact_index=relation_fact_index,
-            temporal_fact_index=temporal_fact_index,
-            temporal_rule_index=temporal_rule_index,
-            shensha_rule_index=shensha_rule_index,
-            evidence_index=evidence_index,
+            fact_index=indexes.fact_index,
+            relation_fact_index=indexes.relation_fact_index,
+            temporal_fact_index=indexes.temporal_fact_index,
+            temporal_rule_index=indexes.temporal_rule_index,
+            shensha_rule_index=indexes.shensha_rule_index,
+            evidence_index=indexes.evidence_index,
         )
         unsupported_ganzhi = sorted(
             char for char in set(claim.statement) & _GANZHI if char not in referenced_text
