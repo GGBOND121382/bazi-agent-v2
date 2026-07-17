@@ -84,42 +84,37 @@ def _xunkong(ganzhi: str) -> tuple[str, str]:
 
 
 def _anchor_values(reference: str, pillars: FourPillars) -> tuple[tuple[str, str], ...]:
-    if reference == "day_stem":
-        return (("day_stem", pillars.day.stem.char),)
-    if reference == "year_stem":
-        return (("year_stem", pillars.year.stem.char),)
-    if reference == "day_or_year_stem":
-        return (
+    direct: dict[str, tuple[tuple[str, str], ...]] = {
+        "day_stem": (("day_stem", pillars.day.stem.char),),
+        "year_stem": (("year_stem", pillars.year.stem.char),),
+        "day_or_year_stem": (
             ("day_stem", pillars.day.stem.char),
             ("year_stem", pillars.year.stem.char),
-        )
-    if reference == "year_branch":
-        return (("year_branch", pillars.year.branch.char),)
-    if reference == "year_pillar":
-        return (("year_pillar", pillars.year.ganzhi),)
-    if reference == "day_branch":
-        return (("day_branch", pillars.day.branch.char),)
+        ),
+        "year_branch": (("year_branch", pillars.year.branch.char),),
+        "year_pillar": (("year_pillar", pillars.year.ganzhi),),
+        "day_branch": (("day_branch", pillars.day.branch.char),),
+        "month_branch": (("month_branch", pillars.month.branch.char),),
+        "day_pillar": (("day_pillar", pillars.day.ganzhi),),
+    }
+    values = direct.get(reference, ())
     if reference == "day_or_year_branch_group":
-        values: list[tuple[str, str]] = []
+        grouped: list[tuple[str, str]] = []
         for label, branch in (
             ("day_branch_group", pillars.day.branch.char),
             ("year_branch_group", pillars.year.branch.char),
         ):
             group = _group_of(branch, _BRANCH_GROUPS)
             if group:
-                values.append((label, group))
-        return tuple(values)
-    if reference == "month_branch":
-        return (("month_branch", pillars.month.branch.char),)
-    if reference == "month_branch_group":
+                grouped.append((label, group))
+        values = tuple(grouped)
+    elif reference == "month_branch_group":
         group = _group_of(pillars.month.branch.char, _BRANCH_GROUPS)
-        return (("month_branch_group", group),) if group else ()
-    if reference == "day_pillar":
-        return (("day_pillar", pillars.day.ganzhi),)
-    if reference == "seasonal_day_pillar":
+        values = (("month_branch_group", group),) if group else ()
+    elif reference == "seasonal_day_pillar":
         group = _group_of(pillars.month.branch.char, _SEASON_GROUPS)
-        return (("season", group),) if group else ()
-    return ()
+        values = (("season", group),) if group else ()
+    return values
 
 
 def _matches(target_kind: str, token: str, ganzhi: str) -> bool:
@@ -188,7 +183,7 @@ def _evaluate_mapped_rule(
         return
     ganzhi_by_position = {
         position: pillar.ganzhi
-        for position, pillar in zip(_POSITION_ORDER, pillars.as_list(), strict=True)
+        for position, pillar in zip(_POSITION_ORDER,  pillars.as_list(), strict=True)
     }
     configured_positions = rule.get("target_positions")
     allowed_positions = (
@@ -211,7 +206,6 @@ def _evaluate_mapped_rule(
                         target_position=position,
                         version=version,
                     )
-
 
 def _evaluate_special_rule(
     bucket: dict[tuple[str, str], ShenShaHit],

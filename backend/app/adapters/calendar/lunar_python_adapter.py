@@ -69,7 +69,7 @@ def _safe_call(obj: Any, method: str, default: object = "") -> object:
 
 def _safe_list(obj: Any, method: str) -> list[object]:
     value = _safe_call(obj, method, [])
-    return list(value) if isinstance(value, (list, tuple)) else []
+    return list(value) if isinstance(value, list | tuple) else []
 
 
 def _solar_to_datetime(value: Any, zone: tzinfo | None) -> datetime:
