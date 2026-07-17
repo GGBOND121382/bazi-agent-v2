@@ -21,11 +21,14 @@ jobs:
       - name: Apply audited temporal and shensha patch
         shell: bash
         run: |
-          git show HEAD^:.github/workflows/windows-startup-smoke.yml > /tmp/windows-startup-smoke.yml
-          cat .github/temporal_patch/chunk_* | base64 -d | gzip -d > /tmp/temporal.patch
-          git apply --check /tmp/temporal.patch
-          git apply /tmp/temporal.patch
-          cp /tmp/windows-startup-smoke.yml .github/workflows/windows-startup-smoke.yml
+          set -euxo pipefail
+          exec > >(tee /tmp/apply.log) 2>&1
+          git merge --no-edit origin/main
+          cat .github/temporal_patch/chunk_* | base64 -d > /tmp/temporal.patch.gz
+          gzip -t /tmp/temporal.patch.gz
+          gzip -dc /tmp/temporal.patch.gz > /tmp/temporal.patch
+          git apply --3way /tmp/temporal.patch
+          git show ae4781963fd0fc04f022d2791525a049b9a06320:.github/workflows/windows-startup-smoke.yml > .github/workflows/windows-startup-smoke.yml
           rm -rf .github/temporal_patch
           rm -f .github/workflows/source-snapshot-debug.yml
           git config user.name github-actions[bot]
@@ -33,6 +36,16 @@ jobs:
           git add -A
           git commit -m "feat: correct exact temporal and shensha calculations"
           git push origin HEAD:agent/mobile-ui-deterministic-chat
+      - name: Upload apply diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: temporal-apply-diagnostics
+          path: |
+            /tmp/apply.log
+            /tmp/temporal.patch
+          if-no-files-found: warn
+          retention-days: 1
 
   smoke:
     runs-on: windows-latest
