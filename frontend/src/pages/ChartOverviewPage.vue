@@ -10,6 +10,18 @@ import type {
   DeterministicPillarDetail,
 } from '@/api/schema'
 
+type ShenshaDetail = {
+  name: string
+  target: string
+  target_position: 'year' | 'month' | 'day' | 'hour'
+  anchor: string
+  reference: string
+  rule_id: string
+  rule_version: string
+  source_title: string
+  source_locator: string
+}
+
 const props = defineProps<{ chartId: string }>()
 const client = useBaziClient()
 const router = useRouter()
@@ -59,6 +71,26 @@ const detailByPosition = computed<Record<string, DeterministicPillarDetail>>(() 
   return Object.fromEntries(items.map((item) => [item.position, item]))
 })
 const fiveElements = computed(() => details.value?.five_elements ?? overview.value?.five_elements ?? [])
+const shenshaDetails = computed<ShenshaDetail[]>(() => {
+  const raw = details.value?.shensha ?? []
+  return raw.flatMap((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return []
+    const value = item as Record<string, unknown>
+    const position = String(value.target_position ?? '')
+    if (!['year', 'month', 'day', 'hour'].includes(position)) return []
+    return [{
+      name: String(value.name ?? ''),
+      target: String(value.target ?? ''),
+      target_position: position as ShenshaDetail['target_position'],
+      anchor: String(value.anchor ?? ''),
+      reference: String(value.reference ?? ''),
+      rule_id: String(value.rule_id ?? ''),
+      rule_version: String(value.rule_version ?? ''),
+      source_title: String(value.source_title ?? ''),
+      source_locator: String(value.source_locator ?? ''),
+    }]
+  })
+})
 const birthplaceText = computed(() => {
   const value = basic.value.birthplace
   if (!value || typeof value !== 'object' || Array.isArray(value)) return '—'
@@ -97,6 +129,11 @@ function textValue(key: string): string {
 
 function detail(position: string): DeterministicPillarDetail | undefined {
   return detailByPosition.value[position]
+}
+
+function relationElement(relation: ChartOverviewViewDTO['relationships'][number]): string {
+  const value = (relation as unknown as Record<string, unknown>).element
+  return typeof value === 'string' ? value : ''
 }
 
 async function startAnalysis() {
@@ -169,6 +206,17 @@ async function startAnalysis() {
         <div class="pillar-grid multi-row shensha-row"><span>神煞</span><div v-for="position in positionOrder" :key="position"><span v-for="item in detail(position)?.shensha || []" :key="item">{{ item }}</span><span v-if="!detail(position)?.shensha?.length">—</span></div></div>
       </section>
 
+      <details v-if="shenshaDetails.length" class="provenance-panel card-surface">
+        <summary>神煞规则依据（{{ shenshaDetails.length }} 条命中）</summary>
+        <div class="provenance-list">
+          <article v-for="item in shenshaDetails" :key="`${item.rule_id}-${item.target_position}`">
+            <strong>{{ positionLabels[item.target_position] }} · {{ item.name }}</strong>
+            <p>查法：{{ item.reference }} = {{ item.anchor }}；命中 {{ item.target }}</p>
+            <small>{{ item.source_title }}<template v-if="item.source_locator"> · {{ item.source_locator }}</template> · {{ item.rule_id }} · {{ item.rule_version }}</small>
+          </article>
+        </div>
+      </details>
+
       <section id="detail-chart" class="analysis-facts-grid">
         <article class="card-surface five-element-panel">
           <header><h2>五行统计</h2><small>明见 + 藏干</small></header>
@@ -178,10 +226,10 @@ async function startAnalysis() {
           </div>
         </article>
         <article class="card-surface relation-panel">
-          <header><h2>干支关系</h2><small>由规则引擎计算</small></header>
+          <header><h2>干支关系</h2><small>天干 + 地支完整规则</small></header>
           <p v-if="!overview.relationships.length">未检测到已配置规则中的显著关系。</p>
           <div v-for="relation in overview.relationships" :key="`${relation.rule_id}-${relation.participants.join('')}`" class="relation-chip">
-            <strong>{{ relation.label }}</strong><span>{{ relation.participants.join(' · ') }}</span>
+            <strong>{{ relation.label }}<template v-if="relationElement(relation)"> · {{ relationElement(relation) }}</template></strong><span>{{ relation.participants.join(' · ') }}</span>
           </div>
         </article>
       </section>
@@ -201,3 +249,12 @@ async function startAnalysis() {
     </template>
   </section>
 </template>
+
+<style scoped>
+.provenance-panel { padding: 0 18px 16px; }
+.provenance-panel summary { padding: 16px 0; cursor: pointer; color: var(--gold-deep); font-weight: 700; }
+.provenance-list { display: grid; gap: 10px; }
+.provenance-list article { padding: 12px 14px; border-radius: 12px; background: var(--surface-soft); }
+.provenance-list p { margin: 6px 0; color: #5f5a52; font-size: .9rem; }
+.provenance-list small { color: #8f887d; line-height: 1.5; overflow-wrap: anywhere; }
+</style>
