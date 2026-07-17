@@ -10,7 +10,7 @@ import json
 import re
 import uuid
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, cast
 
 from ...api.dto import ChartResultDTO, FactDTO, StructuredAnalysisDTO, ValidationResultDTO
 from ..rag.models import RetrievedEvidence
@@ -27,6 +27,16 @@ def _error(code: str, claim_id: str, detail: str) -> dict[str, Any]:
     return {"code": code, "claim_id": claim_id, "detail": detail}
 
 
+def _deterministic_shensha(chart: ChartResultDTO) -> tuple[dict[str, Any], ...]:
+    details = chart.calendar.get("deterministic_details", {})
+    if not isinstance(details, dict):
+        return ()
+    raw = details.get("shensha", [])
+    if not isinstance(raw, list):
+        return ()
+    return tuple(cast(dict[str, Any], item) for item in raw if isinstance(item, dict))
+
+
 def _referenced_text(
     *,
     fact_ids: Iterable[str],
@@ -34,6 +44,7 @@ def _referenced_text(
     evidence_ids: Iterable[str],
     fact_index: dict[str, FactDTO],
     relation_fact_index: dict[str, dict[str, Any]],
+    shensha_rule_index: dict[str, list[dict[str, Any]]],
     evidence_index: dict[str, RetrievedEvidence],
 ) -> str:
     parts = [
@@ -45,6 +56,11 @@ def _referenced_text(
         json.dumps(relation_fact_index[fact_id], ensure_ascii=False, default=str)
         for fact_id in fact_ids
         if fact_id in relation_fact_index
+    )
+    parts.extend(
+        json.dumps(item, ensure_ascii=False, default=str)
+        for rule_id in rule_ids
+        for item in shensha_rule_index.get(rule_id, [])
     )
     parts.extend(
         evidence_index[evidence_id].content
@@ -63,14 +79,23 @@ def verify_analysis(
     computed_relations: Iterable[dict[str, Any]] = (),
 ) -> ValidationResultDTO:
     relation_items = tuple(computed_relations)
+    shensha_items = _deterministic_shensha(chart)
+    shensha_rule_index: dict[str, list[dict[str, Any]]] = {}
+    for item in shensha_items:
+        rule_id = str(item.get("rule_id", ""))
+        if rule_id:
+            shensha_rule_index.setdefault(rule_id, []).append(item)
+
     fact_index = {fact.fact_id: fact for fact in chart.facts}
     relation_fact_index = {
         str(item["fact_id"]): item for item in relation_items if "fact_id" in item
     }
     evidence_index = {item.chunk_id: item for item in evidence}
-    chart_rules = {fact.rule_id for fact in chart.facts} | {
-        str(item["rule_id"]) for item in relation_items if "rule_id" in item
-    }
+    chart_rules = (
+        {fact.rule_id for fact in chart.facts}
+        | {str(item["rule_id"]) for item in relation_items if "rule_id" in item}
+        | set(shensha_rule_index)
+    )
     known_rules = chart_rules | set(evidence_index)
     authoritative_rules = chart_rules | {
         item.chunk_id
@@ -120,7 +145,9 @@ def verify_analysis(
         if claim.school and claim.school != configured_school:
             errors.append(_error("CLAIM_SCHOOL_MISMATCH", claim.claim_id, claim.school))
         if _RISK.search(claim.statement):
-            errors.append(_error("POLICY_HIGH_RISK_ASSERTION", claim.claim_id, "absolute unsafe assertion"))
+            errors.append(
+                _error("POLICY_HIGH_RISK_ASSERTION", claim.claim_id, "absolute unsafe assertion")
+            )
 
         # A referenced-text mismatch can come from natural-language discussion of
         # another pillar or temporal干支. It is useful diagnostics, not a reason to
@@ -131,6 +158,7 @@ def verify_analysis(
             evidence_ids=claim.evidence_ids,
             fact_index=fact_index,
             relation_fact_index=relation_fact_index,
+            shensha_rule_index=shensha_rule_index,
             evidence_index=evidence_index,
         )
         unsupported_ganzhi = sorted(
