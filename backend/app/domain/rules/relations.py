@@ -10,7 +10,6 @@ import json
 from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from functools import lru_cache
-from itertools import combinations
 from pathlib import Path
 from typing import Any, cast
 
@@ -48,8 +47,8 @@ def _pair_in(values: Collection[str], pair: Iterable[str]) -> bool:
     return all(value in values for value in pair)
 
 
-def _full_group_present(values: Collection[str], group: list[object]) -> bool:
-    return all(str(value) in values for value in group)
+def _full_group_present(values: Collection[str], group: Collection[str]) -> bool:
+    return all(value in values for value in group)
 
 
 def evaluate_relations(pillars: FourPillars) -> list[BranchRelation]:
@@ -110,7 +109,7 @@ def evaluate_relations(pillars: FourPillars) -> list[BranchRelation]:
         tri = [str(value) for value in combo.get("branches", [])]
         if len(tri) != 3:
             continue
-        full = _full_group_present(seen_branches, cast(list[object], tri))
+        full = _full_group_present(seen_branches, tri)
         element = str(combo.get("element") or "") or None
         if full:
             hits.append(
@@ -140,7 +139,7 @@ def evaluate_relations(pillars: FourPillars) -> list[BranchRelation]:
         tri = [str(value) for value in combo.get("branches", [])]
         if len(tri) != 3:
             continue
-        full = _full_group_present(seen_branches, cast(list[object], tri))
+        full = _full_group_present(seen_branches, tri)
         element = str(combo.get("element") or "") or None
         if full:
             hits.append(
@@ -183,8 +182,11 @@ def evaluate_relations(pillars: FourPillars) -> list[BranchRelation]:
     for punishment in rels.get("punishments", []):
         if not isinstance(punishment, dict):
             continue
+        raw_values = punishment.get("branches", [])
+        if not isinstance(raw_values, list):
+            continue
         kind = str(punishment.get("type", ""))
-        values = tuple(str(value) for value in punishment.get("branches", []))
+        values = tuple(str(value) for value in raw_values)
         if kind == "three_punishment" and len(values) == 3 and _pair_in(seen_branches, values):
             hits.append(
                 BranchRelation("punishment", values, None, "BRANCH-PUNISHMENT-3-001")
