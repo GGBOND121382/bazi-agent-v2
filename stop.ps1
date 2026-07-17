@@ -1,13 +1,13 @@
 <#
-stop.ps1 — 停止后端、前端和后台启动任务。
+stop.ps1 - Stop backend, frontend, and background startup worker.
 
-用法:
+Usage:
     .\stop.ps1
     .\stop.ps1 -Force
     .\stop.ps1 -BackendPort 9000 -FrontendPort 5174
 
-兼容 Windows PowerShell 5.1。PID 文件缺失时，会按端口和命令行识别本项目进程；
-无法确认为本项目的进程不会被终止。
+Compatible with Windows PowerShell 5.1. If PID files are missing, the script
+checks listening ports and process command lines. Unknown processes are not killed.
 #>
 
 [CmdletBinding()]
@@ -110,7 +110,7 @@ function Stop-ProcessTree {
 
     $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
     if ($null -eq $process) {
-        Write-Host "SKIP  $Name PID $ProcessId 已不存在" -ForegroundColor DarkGray
+        Write-Host "SKIP  $Name PID $ProcessId no longer exists" -ForegroundColor DarkGray
         return
     }
 
@@ -118,7 +118,7 @@ function Stop-ProcessTree {
 
     if ($ForceStop) {
         & taskkill.exe /F /T /PID $ProcessId 2>&1 | Out-Null
-        Write-Host "KILL  $Name 已强制终止" -ForegroundColor Red
+        Write-Host "KILL  $Name force-stopped" -ForegroundColor Red
         return
     }
 
@@ -127,12 +127,12 @@ function Stop-ProcessTree {
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 250
         if ($null -eq (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) {
-            Write-Host "OK    $Name 已停止" -ForegroundColor Green
+            Write-Host "OK    $Name stopped" -ForegroundColor Green
             return
         }
     }
 
-    Write-Host "WARN  $Name 未在 3 秒内退出，终止进程树" -ForegroundColor Yellow
+    Write-Host "WARN  $Name did not exit in 3 seconds; killing process tree" -ForegroundColor Yellow
     & taskkill.exe /F /T /PID $ProcessId 2>&1 | Out-Null
 }
 
@@ -156,7 +156,7 @@ function Stop-StartupWorker {
 
     $commandLine = Get-ProcessCommandLine -ProcessId $processId
     if (-not (Test-ExpectedCommand -Kind 'startup' -CommandLine $commandLine)) {
-        Write-Host "REFUSE startup PID $processId 无法确认为本项目启动任务" -ForegroundColor Red
+        Write-Host "REFUSE startup PID $processId is not recognized" -ForegroundColor Red
         Write-Host "       $commandLine" -ForegroundColor DarkYellow
         Remove-Item -LiteralPath $StartupPidFile -Force -ErrorAction SilentlyContinue
         return
@@ -176,13 +176,13 @@ function Stop-TrackedService {
     )
 
     if (-not (Test-Path -LiteralPath $PidFile)) {
-        Write-Host "INFO  $Name 无 PID 文件，将按端口继续检查" -ForegroundColor DarkGray
+        Write-Host "INFO  $Name has no PID file; checking its port" -ForegroundColor DarkGray
         return
     }
 
     $value = (Get-Content -LiteralPath $PidFile -Raw).Trim()
     if ($value -notmatch '^\d+$') {
-        Write-Host "WARN  $Name PID 文件无效，将按端口继续检查" -ForegroundColor Yellow
+        Write-Host "WARN  $Name PID file is invalid; checking its port" -ForegroundColor Yellow
         Remove-TrackingFiles -PidFile $PidFile -StartFile $StartFile
         return
     }
@@ -190,7 +190,7 @@ function Stop-TrackedService {
     $processId = [int]$value
     $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
     if ($null -eq $process) {
-        Write-Host "INFO  $Name PID $processId 已不存在" -ForegroundColor DarkGray
+        Write-Host "INFO  $Name PID $processId no longer exists" -ForegroundColor DarkGray
         Remove-TrackingFiles -PidFile $PidFile -StartFile $StartFile
         return
     }
@@ -205,7 +205,7 @@ function Stop-TrackedService {
     $commandLine = Get-ProcessCommandLine -ProcessId $processId
     $commandMatches = Test-ExpectedCommand -Kind $Kind -CommandLine $commandLine
     if ((-not $startMatches) -or (-not $commandMatches)) {
-        Write-Host "WARN  $Name PID $processId 身份不匹配，将按端口继续检查" -ForegroundColor Yellow
+        Write-Host "WARN  $Name PID $processId identity mismatch; checking its port" -ForegroundColor Yellow
         Write-Host "      $commandLine" -ForegroundColor DarkYellow
         Remove-TrackingFiles -PidFile $PidFile -StartFile $StartFile
         return
@@ -225,7 +225,7 @@ function Stop-ServiceByPort {
 
     $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
     if ($listeners.Count -eq 0) {
-        Write-Host "DOWN  $Name 端口 $Port 未监听" -ForegroundColor DarkGray
+        Write-Host "DOWN  $Name port $Port is not listening" -ForegroundColor DarkGray
         return
     }
 
@@ -234,12 +234,12 @@ function Stop-ServiceByPort {
         $processId = [int]$processIdValue
         $commandLine = Get-ProcessCommandLine -ProcessId $processId
         if (-not (Test-ExpectedCommand -Kind $Kind -CommandLine $commandLine)) {
-            Write-Host "REFUSE $Name 端口 $Port 的 PID $processId 无法确认为本项目进程" -ForegroundColor Red
+            Write-Host "REFUSE $Name port $Port PID $processId is not recognized" -ForegroundColor Red
             Write-Host "       $commandLine" -ForegroundColor DarkYellow
             continue
         }
 
-        Write-Host "FOUND $Name 孤儿进程 port=$Port pid=$processId" -ForegroundColor Yellow
+        Write-Host "FOUND orphan $Name port=$Port pid=$processId" -ForegroundColor Yellow
         Stop-ProcessTree -ProcessId $processId -Name $Name -ForceStop:$ForceStop
     }
 }
@@ -268,8 +268,8 @@ if ($frontendListeners.Count -eq 0) {
 
 $hasRemainingListener = (($backendListeners.Count -gt 0) -or ($frontendListeners.Count -gt 0))
 if ($hasRemainingListener) {
-    Write-Host 'DONE  已停止可确认的本项目进程，但仍有无法确认的端口占用。' -ForegroundColor Yellow
+    Write-Host 'DONE  Known project processes were stopped, but an unknown port owner remains.' -ForegroundColor Yellow
     exit 1
 }
 
-Write-Host 'DONE  后端和前端均已停止，端口已释放' -ForegroundColor Green
+Write-Host 'DONE  Backend and frontend are stopped; ports are free.' -ForegroundColor Green
