@@ -1,6 +1,8 @@
 name: Source snapshot debug
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [agent/mobile-ui-deterministic-chat]
 
