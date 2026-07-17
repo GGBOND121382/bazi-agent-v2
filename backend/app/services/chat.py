@@ -39,7 +39,6 @@ _CHAT_SCHEMA: dict[str, Any] = {
 }
 
 
-
 def _serialize_evidence(item: RetrievedEvidence) -> dict[str, object]:
     return {
         "evidence_id": item.chunk_id,
@@ -95,6 +94,7 @@ class FortuneChatService:
                     f"{target_pillars['year']}流年{target_pillars['month']}流月",
                     f"{target_pillars['day']}流日财运事业感情",
                     f"大运{active_dayun.get('ganzhi', '')}与原局作用",
+                    "旺相休囚死 格局喜用 大运流年流月流日层级",
                 )
                 if item.strip()
             )
@@ -104,30 +104,49 @@ class FortuneChatService:
                 queries=queries,
                 school=school,
                 task_type="interpretation",
-                top_k=10,
+                top_k=12,
                 case_top_k=3,
                 explanation_top_k=4,
             )
         )
         evidence_payload = [_serialize_evidence(item) for item in evidence]
+        natal_payload = {
+            "day_master": chart.day_master,
+            "pillars": [item.model_dump(mode="json") for item in chart.pillars],
+            "facts": [item.model_dump(mode="json") for item in chart.facts],
+            "deterministic_details": deterministic_details,
+        }
+        temporal_payload = {
+            "qiyun": temporal.qiyun,
+            "dayun_table": temporal.dayuns,
+            "active_dayun": active_dayun,
+            "liunian": temporal.year,
+            "liuyue_table": temporal.months,
+            "selected_liuri": selected_day,
+            "target_pillars": target_pillars,
+            "seasonal_strength": temporal.seasonal_strength,
+        }
+        analysis_context = {
+            "context_version": "bazi-fortune-chat-context-v1",
+            "immutable": True,
+            "fact_authority": "deterministic_engine_only",
+            "natal": natal_payload,
+            "temporal": temporal_payload,
+            "model_boundary": {
+                "must_not_recalculate_chart_or_temporal_pillars": True,
+                "must_not_change_ten_gods_hidden_stems_nayin_or_shensha": True,
+                "must_follow_natal_dayun_year_month_day_hierarchy": True,
+            },
+        }
         payload: dict[str, Any] = {
             "chart_id": chart_id,
             "question": question,
             "scope": scope,
             "target_date": target_date.isoformat(),
-            "natal_chart": {
-                "day_master": chart.day_master,
-                "pillars": [item.model_dump(mode="json") for item in chart.pillars],
-                "facts": [item.model_dump(mode="json") for item in chart.facts],
-                "deterministic_details": deterministic_details,
-            },
-            "temporal_context": {
-                "dayun": active_dayun,
-                "liunian": temporal.year,
-                "liuyue_table": temporal.months,
-                "selected_day": selected_day,
-                "target_pillars": target_pillars,
-            },
+            "analysis_context": analysis_context,
+            # Compatibility fields for existing providers and recorded fixtures.
+            "natal_chart": natal_payload,
+            "temporal_context": temporal_payload,
             "retrieved_evidence": evidence_payload,
             "conversation_history": list(history[-8:]),
             "answer_policy": {
@@ -135,6 +154,7 @@ class FortuneChatService:
                 "cover_opportunities_obstacles_timing_and_advice": True,
                 "allow_school_based_strength_pattern_and_useful_element_judgments": True,
                 "avoid_repetitive_audit_disclaimers": True,
+                "reflect_before_answer": True,
             },
         }
         response = self.provider_factory().complete_json(
@@ -148,11 +168,15 @@ class FortuneChatService:
         if not answer:
             raise ValueError("provider returned an empty chat answer")
         raw_sections = response.payload.get("sections", [])
-        sections = [
-            cast(dict[str, object], item)
-            for item in raw_sections
-            if isinstance(item, dict) and str(item.get("content", "")).strip()
-        ] if isinstance(raw_sections, list) else []
+        sections = (
+            [
+                cast(dict[str, object], item)
+                for item in raw_sections
+                if isinstance(item, dict) and str(item.get("content", "")).strip()
+            ]
+            if isinstance(raw_sections, list)
+            else []
+        )
         known_evidence = {item.chunk_id: item for item in evidence}
         raw_citations = response.payload.get("citations", [])
         citation_ids = [
@@ -175,12 +199,7 @@ class FortuneChatService:
             "citations": citations,
             "scope": scope,
             "target_date": target_date.isoformat(),
-            "deterministic_context": {
-                "dayun": active_dayun,
-                "year": temporal.year,
-                "selected_day": selected_day,
-                "target_pillars": target_pillars,
-            },
+            "deterministic_context": temporal_payload,
             "model_id": response.model_id,
             "prompt_version": response.prompt_version,
         }
