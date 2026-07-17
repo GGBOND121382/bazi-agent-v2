@@ -18,7 +18,9 @@ from .relations import (
 from .shensha import (
     ShenShaHit,
     evaluate_shensha,
+    evaluate_shensha_for_target,
 )
+from .temporal import build_temporal_context, compute_exact_yun, describe_temporal_pillar
 
 __all__ = [
     "BranchRelation",
@@ -26,8 +28,12 @@ __all__ = [
     "LiuyunContext",
     "QiyunResult",
     "ShenShaHit",
+    "build_temporal_context",
+    "compute_exact_yun",
     "compute_liuyun",
     "compute_qiyun_and_dayun",
+    "describe_temporal_pillar",
     "evaluate_relations",
     "evaluate_shensha",
+    "evaluate_shensha_for_target",
 ]

@@ -193,23 +193,95 @@ export type UserPreferencesDTO = {
   default_analysis_topics?: string[]
 }
 
+export type TemporalShenshaDTO = {
+  name: string
+  rule_id: string
+  reference?: string
+  anchor?: string
+  anchor_position?: string | null
+  target?: string
+  source_title?: string
+  source_locator?: string
+  rule_version?: string
+  variant?: string
+}
+
+export type TemporalPillarDetailDTO = {
+  ganzhi: string
+  stem: string
+  branch: string
+  stem_ten_god: string
+  branch_ten_god: string
+  hidden_stems: { stem: string; ten_god: string }[]
+  growth_stage: string
+  self_seat: string
+  xunkong: string
+  nayin: string
+  shensha: TemporalShenshaDTO[]
+  relations: {
+    type: string
+    label: string
+    participants: string[]
+    natal_position?: string
+    element?: string | null
+    rule_id: string
+  }[]
+}
+
+export type TemporalDayunDTO = TemporalPillarDetailDTO & {
+  index: number
+  start_year: number
+  end_year: number
+  start_age: number
+  end_age: number
+  fact_id: string
+  rule_id: string
+}
+
+export type TemporalMonthDTO = TemporalPillarDetailDTO & {
+  index: number
+  label: string
+  jie_name: string
+  start_datetime: string
+  end_datetime: string
+  fact_id: string
+  rule_id: string
+}
+
 export type TemporalContextViewDTO = {
   schema_version: 'temporal-context-view-v1'
   chart_id: string
   target_year: number
   breadcrumb: { level: string; label: string; ganzhi?: string | null }[]
-  active_dayun?: Record<string, unknown> | null
-  year: { ganzhi: string; stem: string; branch: string; fact_id: string; rule_id: string }
-  months: {
-    index: number
-    label: string
-    ganzhi: string
-    stem: string
-    branch: string
+  qiyun?: {
+    direction?: string
+    start_years?: number
+    start_months?: number
+    start_days?: number
+    start_hours?: number
+    start_datetime?: string
+    rule_id?: string
+  } | null
+  dayuns: TemporalDayunDTO[]
+  active_dayun?: TemporalDayunDTO | null
+  year: TemporalPillarDetailDTO & {
+    year: number
+    age: number
+    xiaoyun?: string | null
     fact_id: string
     rule_id: string
-  }[]
+  }
+  months: TemporalMonthDTO[]
+  selected_day?: TemporalPillarDetailDTO & {
+    date: string
+    lunar_date: string
+    month_ganzhi: string
+    fact_id: string
+    rule_id: string
+  }
+  seasonal_strength: Record<string, string>
 }
+
 
 export type ReportBlockDTO = {
   block_id: string

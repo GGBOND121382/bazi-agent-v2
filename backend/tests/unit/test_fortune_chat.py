@@ -42,11 +42,15 @@ class _ChartService:
             warnings=[],
         )
 
-    def get_temporal_context(self, chart_id: str, target_year: int) -> TemporalContextViewDTO:
+    def get_temporal_context(
+        self, chart_id: str, target_year: int, target_date: date | None = None
+    ) -> TemporalContextViewDTO:
+        del target_date
         return TemporalContextViewDTO(
             chart_id=chart_id,
             target_year=target_year,
             breadcrumb=[],
+            dayuns=[],
             active_dayun={"ganzhi": "辛卯", "index": 3},
             year={
                 "ganzhi": "丙午",

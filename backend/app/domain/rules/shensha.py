@@ -1,9 +1,9 @@
 """Versioned, source-traceable 神煞 calculation.
 
-The rule table is intentionally data driven. Classical and modern schools
-sometimes use different anchors, so every hit records the exact rule id,
-anchor and source locator. 神煞 are deterministic auxiliary markers; they do
-not replace 月令、旺衰、格局、用神、十神 or 干支作用.
+The engine separates natal-position matching from external temporal matching.
+That distinction is important: year/day-branch markers such as 将星 are not
+reported on the anchor pillar itself in the APP-compatible convention, while
+the same branch may legitimately trigger the marker in 大运、流年、流月或流日.
 """
 from __future__ import annotations
 
@@ -11,15 +11,16 @@ import json
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
-from ..pillars import EARTHLY_BRANCHES, HEAVENLY_STEMS, FourPillars
+from ..pillars import EARTHLY_BRANCHES, HEAVENLY_STEMS, FourPillars, Pillar
 
 CORE_TABLES = Path(__file__).resolve().parents[4] / "contracts" / "core_tables"
 SHENSHA_FILE = CORE_TABLES / "shensha_classics_v2.json"
 _POSITION_ORDER = ("year", "month", "day", "hour")
 _BRANCH_GROUPS = ("申子辰", "寅午戌", "巳酉丑", "亥卯未")
 _SEASON_GROUPS = ("寅卯辰", "巳午未", "申酉戌", "亥子丑")
+TemporalScope = Literal["dayun", "liunian", "liuyue", "liuri", "liushi"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +34,8 @@ class ShenShaHit:
     source_title: str
     source_locator: str
     rule_version: str
+    anchor_position: str | None = None
+    variant: str = "classical_or_common"
 
 
 @lru_cache(maxsize=1)
@@ -83,37 +86,52 @@ def _xunkong(ganzhi: str) -> tuple[str, str]:
     )
 
 
-def _anchor_values(reference: str, pillars: FourPillars) -> tuple[tuple[str, str], ...]:
-    direct: dict[str, tuple[tuple[str, str], ...]] = {
-        "day_stem": (("day_stem", pillars.day.stem.char),),
-        "year_stem": (("year_stem", pillars.year.stem.char),),
+def _nayin_element(pillar: Pillar) -> str:
+    nayin = pillar.nayin
+    return nayin[-1] if nayin and nayin[-1] in "木火土金水" else ""
+
+
+def _anchor_values(
+    reference: str,
+    pillars: FourPillars,
+    *,
+    season_branch: str | None = None,
+) -> tuple[tuple[str, str, str | None], ...]:
+    direct: dict[str, tuple[tuple[str, str, str | None], ...]] = {
+        "day_stem": (("day_stem", pillars.day.stem.char, "day"),),
+        "year_stem": (("year_stem", pillars.year.stem.char, "year"),),
         "day_or_year_stem": (
-            ("day_stem", pillars.day.stem.char),
-            ("year_stem", pillars.year.stem.char),
+            ("day_stem", pillars.day.stem.char, "day"),
+            ("year_stem", pillars.year.stem.char, "year"),
         ),
-        "year_branch": (("year_branch", pillars.year.branch.char),),
-        "year_pillar": (("year_pillar", pillars.year.ganzhi),),
-        "day_branch": (("day_branch", pillars.day.branch.char),),
-        "month_branch": (("month_branch", pillars.month.branch.char),),
-        "day_pillar": (("day_pillar", pillars.day.ganzhi),),
+        "year_branch": (("year_branch", pillars.year.branch.char, "year"),),
+        "year_pillar": (("year_pillar", pillars.year.ganzhi, "year"),),
+        "day_branch": (("day_branch", pillars.day.branch.char, "day"),),
+        "month_branch": (("month_branch", pillars.month.branch.char, "month"),),
+        "day_pillar": (("day_pillar", pillars.day.ganzhi, "day"),),
+        "year_nayin_element": (("year_nayin_element", _nayin_element(pillars.year), "year"),),
     }
     values = direct.get(reference, ())
     if reference == "day_or_year_branch_group":
-        grouped: list[tuple[str, str]] = []
-        for label, branch in (
-            ("day_branch_group", pillars.day.branch.char),
-            ("year_branch_group", pillars.year.branch.char),
+        grouped: list[tuple[str, str, str | None]] = []
+        for label, branch, position in (
+            ("day_branch_group", pillars.day.branch.char, "day"),
+            ("year_branch_group", pillars.year.branch.char, "year"),
         ):
             group = _group_of(branch, _BRANCH_GROUPS)
             if group:
-                grouped.append((label, group))
+                grouped.append((label, group, position))
         values = tuple(grouped)
+    elif reference == "year_branch_group":
+        group = _group_of(pillars.year.branch.char, _BRANCH_GROUPS)
+        values = (("year_branch_group", group, "year"),) if group else ()
     elif reference == "month_branch_group":
         group = _group_of(pillars.month.branch.char, _BRANCH_GROUPS)
-        values = (("month_branch_group", group),) if group else ()
+        values = (("month_branch_group", group, "month"),) if group else ()
     elif reference == "seasonal_day_pillar":
-        group = _group_of(pillars.month.branch.char, _SEASON_GROUPS)
-        values = (("season", group),) if group else ()
+        branch = season_branch or pillars.month.branch.char
+        group = _group_of(branch, _SEASON_GROUPS)
+        values = (("season", group, "month"),) if group else ()
     return values
 
 
@@ -145,17 +163,25 @@ def _add_hit(
     target: str,
     target_position: str,
     version: str,
+    anchor_position: str | None = None,
 ) -> None:
     source_title, source_locator = _source(rule)
     key = (str(rule["rule_id"]), target_position)
     previous = bucket.get(key)
     merged_anchor = anchor
     merged_reference = reference
+    merged_anchor_position = anchor_position
     if previous is not None:
         merged_anchor = " / ".join(dict.fromkeys((*previous.anchor.split(" / "), anchor)))
         merged_reference = " / ".join(
             dict.fromkeys((*previous.reference.split(" / "), reference))
         )
+        positions = tuple(
+            item
+            for item in (previous.anchor_position, anchor_position)
+            if item
+        )
+        merged_anchor_position = " / ".join(dict.fromkeys(positions)) or None
     bucket[key] = ShenShaHit(
         name=str(rule["name"]),
         rule_id=str(rule["rule_id"]),
@@ -166,10 +192,16 @@ def _add_hit(
         source_title=source_title,
         source_locator=source_locator,
         rule_version=version,
+        anchor_position=merged_anchor_position,
+        variant=str(rule.get("variant", "classical_or_common")),
     )
 
 
-def _evaluate_mapped_rule(
+def _exclude_natal_self(rule: dict[str, Any], anchor_position: str | None, position: str) -> bool:
+    return bool(rule.get("exclude_anchor_position")) and anchor_position == position
+
+
+def _evaluate_mapped_natal(
     bucket: dict[tuple[str, str], ShenShaHit],
     *,
     rule: dict[str, Any],
@@ -183,7 +215,7 @@ def _evaluate_mapped_rule(
         return
     ganzhi_by_position = {
         position: pillar.ganzhi
-        for position, pillar in zip(_POSITION_ORDER,  pillars.as_list(), strict=True)
+        for position, pillar in zip(_POSITION_ORDER, pillars.as_list(), strict=True)
     }
     configured_positions = rule.get("target_positions")
     allowed_positions = (
@@ -191,10 +223,12 @@ def _evaluate_mapped_rule(
         if isinstance(configured_positions, list)
         else set(_POSITION_ORDER)
     )
-    for anchor_label, anchor_value in _anchor_values(reference, pillars):
+    for anchor_label, anchor_value, anchor_position in _anchor_values(reference, pillars):
         for token in _targets(mapping.get(anchor_value)):
             for position, ganzhi in ganzhi_by_position.items():
                 if position not in allowed_positions:
+                    continue
+                if _exclude_natal_self(rule, anchor_position, position):
                     continue
                 if _matches(target_kind, token, ganzhi):
                     _add_hit(
@@ -202,12 +236,131 @@ def _evaluate_mapped_rule(
                         rule=rule,
                         reference=anchor_label,
                         anchor=anchor_value,
+                        anchor_position=anchor_position,
                         target=token,
                         target_position=position,
                         version=version,
                     )
 
-def _evaluate_special_rule(
+
+def _evaluate_mapped_target(
+    bucket: dict[tuple[str, str], ShenShaHit],
+    *,
+    rule: dict[str, Any],
+    natal: FourPillars,
+    target: Pillar,
+    target_position: str,
+    version: str,
+    season_branch: str | None,
+) -> None:
+    reference = str(rule.get("reference", ""))
+    target_kind = str(rule.get("target_kind", "branch"))
+    mapping = rule.get("mapping", {})
+    if not isinstance(mapping, dict):
+        return
+    scopes = rule.get("temporal_scopes")
+    if isinstance(scopes, list) and target_position not in {str(item) for item in scopes}:
+        return
+    for anchor_label, anchor_value, anchor_position in _anchor_values(
+        reference, natal, season_branch=season_branch
+    ):
+        for token in _targets(mapping.get(anchor_value)):
+            if _matches(target_kind, token, target.ganzhi):
+                _add_hit(
+                    bucket,
+                    rule=rule,
+                    reference=anchor_label,
+                    anchor=anchor_value,
+                    anchor_position=anchor_position,
+                    target=token,
+                    target_position=target_position,
+                    version=version,
+                )
+
+
+def _gender_group(pillars: FourPillars, gender: str) -> str | None:
+    if gender not in {"male", "female"}:
+        return None
+    yang_year = pillars.year.stem.yin_yang == "yang"
+    return "yang_male_yin_female" if (gender == "male") == yang_year else "yin_male_yang_female"
+
+
+def _offset_branch(branch: str, steps: int) -> str:
+    return EARTHLY_BRANCHES[(EARTHLY_BRANCHES.index(branch) + steps) % 12]
+
+
+def _special_target_branch(rule: dict[str, Any], pillars: FourPillars, gender: str) -> str | None:
+    reference = str(rule.get("reference", ""))
+    group = _gender_group(pillars, gender)
+    if group is None:
+        return None
+    if reference == "year_branch_goujiao":
+        steps = 3 if group == "yang_male_yin_female" else -3
+        return _offset_branch(pillars.year.branch.char, steps)
+    if reference == "year_branch_yuanchen":
+        mapping = rule.get("mapping", {})
+        if not isinstance(mapping, dict):
+            return None
+        group_mapping = mapping.get(group, {})
+        if not isinstance(group_mapping, dict):
+            return None
+        value = group_mapping.get(pillars.year.branch.char)
+        return str(value) if value else None
+    return None
+
+
+def _evaluate_gender_natal(
+    bucket: dict[tuple[str, str], ShenShaHit],
+    *,
+    rule: dict[str, Any],
+    pillars: FourPillars,
+    gender: str,
+    version: str,
+) -> None:
+    target = _special_target_branch(rule, pillars, gender)
+    if not target:
+        return
+    for position, pillar in zip(_POSITION_ORDER, pillars.as_list(), strict=True):
+        if position == "year":
+            continue
+        if pillar.branch.char == target:
+            _add_hit(
+                bucket,
+                rule=rule,
+                reference=str(rule.get("reference", "")),
+                anchor=f"{pillars.year.ganzhi}/{gender}",
+                anchor_position="year",
+                target=target,
+                target_position=position,
+                version=version,
+            )
+
+
+def _evaluate_gender_target(
+    bucket: dict[tuple[str, str], ShenShaHit],
+    *,
+    rule: dict[str, Any],
+    natal: FourPillars,
+    target: Pillar,
+    target_position: str,
+    gender: str,
+    version: str,
+) -> None:
+    target_branch = _special_target_branch(rule, natal, gender)
+    if target_branch and target.branch.char == target_branch:
+        _add_hit(
+            bucket,
+            rule=rule,
+            reference=str(rule.get("reference", "")),
+            anchor=f"{natal.year.ganzhi}/{gender}",
+            anchor_position="year",
+            target=target_branch,
+            target_position=target_position,
+            version=version,
+        )
+
+
+def _evaluate_special_natal(
     bucket: dict[tuple[str, str], ShenShaHit],
     *,
     rule: dict[str, Any],
@@ -223,6 +376,7 @@ def _evaluate_special_rule(
                 rule=rule,
                 reference="day_pillar",
                 anchor=pillars.day.ganzhi,
+                anchor_position="day",
                 target=pillars.day.ganzhi,
                 target_position="day",
                 version=version,
@@ -260,24 +414,113 @@ def _evaluate_special_rule(
                 )
 
 
-def evaluate_shensha(pillars: FourPillars) -> list[ShenShaHit]:
+def _evaluate_special_target(
+    bucket: dict[tuple[str, str], ShenShaHit],
+    *,
+    rule: dict[str, Any],
+    natal: FourPillars,
+    target: Pillar,
+    target_position: str,
+    version: str,
+) -> None:
+    reference = str(rule.get("reference", ""))
+    if reference == "year_or_day_xunkong":
+        targets = set(_xunkong(natal.year.ganzhi)) | set(_xunkong(natal.day.ganzhi))
+        if target.branch.char in targets:
+            _add_hit(
+                bucket,
+                rule=rule,
+                reference="year/day_xunkong",
+                anchor=f"{natal.year.ganzhi}/{natal.day.ganzhi}",
+                target=target.branch.char,
+                target_position=target_position,
+                version=version,
+            )
+        return
+    if reference == "day_pillar" and target_position == "liuri":
+        values = {str(item) for item in cast(list[object], rule.get("values", []))}
+        if target.ganzhi in values:
+            _add_hit(
+                bucket,
+                rule=rule,
+                reference="flow_day_pillar",
+                anchor=target.ganzhi,
+                target=target.ganzhi,
+                target_position=target_position,
+                version=version,
+            )
+
+
+def _rules() -> tuple[str, list[dict[str, Any]]]:
     catalog = _catalog()
     version = str(catalog.get("version", "unknown"))
     raw_rules = catalog.get("rules", [])
     if not isinstance(raw_rules, list):
-        return []
+        return version, []
+    return version, [cast(dict[str, Any], item) for item in raw_rules if isinstance(item, dict)]
+
+
+def evaluate_shensha(pillars: FourPillars, *, gender: str = "unspecified") -> list[ShenShaHit]:
+    """Evaluate natal shensha using APP-compatible anchor self-exclusion."""
+    version, rules = _rules()
     bucket: dict[tuple[str, str], ShenShaHit] = {}
-    for raw_rule in raw_rules:
-        if not isinstance(raw_rule, dict):
-            continue
-        rule = cast(dict[str, Any], raw_rule)
+    for rule in rules:
         reference = str(rule.get("reference", ""))
-        if reference in {"year_or_day_xunkong", "consecutive_stems", "day_pillar"}:
-            _evaluate_special_rule(bucket, rule=rule, pillars=pillars, version=version)
+        if reference in {"year_branch_goujiao", "year_branch_yuanchen"}:
+            _evaluate_gender_natal(
+                bucket, rule=rule, pillars=pillars, gender=gender, version=version
+            )
+        elif reference in {"year_or_day_xunkong", "consecutive_stems", "day_pillar"}:
+            _evaluate_special_natal(bucket, rule=rule, pillars=pillars, version=version)
         else:
-            _evaluate_mapped_rule(bucket, rule=rule, pillars=pillars, version=version)
+            _evaluate_mapped_natal(bucket, rule=rule, pillars=pillars, version=version)
     position_rank = {position: index for index, position in enumerate(_POSITION_ORDER)}
     return sorted(
         bucket.values(),
         key=lambda hit: (position_rank.get(hit.target_position, 99), hit.rule_id),
     )
+
+
+def evaluate_shensha_for_target(
+    natal: FourPillars,
+    target: Pillar,
+    *,
+    target_position: TemporalScope,
+    gender: str = "unspecified",
+    season_branch: str | None = None,
+) -> list[ShenShaHit]:
+    """Evaluate one external temporal pillar against the natal anchors."""
+    version, rules = _rules()
+    bucket: dict[tuple[str, str], ShenShaHit] = {}
+    for rule in rules:
+        reference = str(rule.get("reference", ""))
+        if reference in {"year_branch_goujiao", "year_branch_yuanchen"}:
+            _evaluate_gender_target(
+                bucket,
+                rule=rule,
+                natal=natal,
+                target=target,
+                target_position=target_position,
+                gender=gender,
+                version=version,
+            )
+        elif reference in {"year_or_day_xunkong", "day_pillar"}:
+            _evaluate_special_target(
+                bucket,
+                rule=rule,
+                natal=natal,
+                target=target,
+                target_position=target_position,
+                version=version,
+            )
+        elif reference != "consecutive_stems":
+            _evaluate_mapped_target(
+                bucket,
+                rule=rule,
+                natal=natal,
+                target=target,
+                target_position=target_position,
+                version=version,
+                season_branch=season_branch,
+            )
+    return sorted(bucket.values(), key=lambda hit: (hit.name, hit.rule_id))

@@ -1,16 +1,17 @@
-"""流运 (流年 / 流月 / 流日) context computation.
+"""Backward-compatible 流运 context helpers.
 
-Pure functions; on-demand. The frontend asks "what does this year/month/day
-look like for this chart?" and we compute the relevant 柱 + active 大运 overlay
-+ active 神煞 / relations.
+New API responses use :mod:`temporal`; this small wrapper remains for callers
+and tests that only need year/month pillars and an active legacy DayunPeriod.
+It deliberately has no dependency on calendar adapters, avoiding a domain ↔
+adapter import cycle.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 
-from ...adapters.calendar import CalendarAdapter, LunarPythonAdapter
-from ..pillars import FourPillars, Pillar
+from lunar_python import Solar
+
+from ..pillars import Branch, FourPillars, Pillar, Stem
 from .qiyun_dayun import DayunPeriod
 
 
@@ -18,42 +19,29 @@ from .qiyun_dayun import DayunPeriod
 class LiuyunContext:
     target_year: int
     year_pillar: Pillar
-    month_pillars: tuple[Pillar, ...]  # 12 monthly pillars (rough)
-    active_dayun: DayunPeriod | None  # the 大运 that covers target_year's age
+    month_pillars: tuple[Pillar, ...]
+    active_dayun: DayunPeriod | None
 
 
-_ADAPTER: CalendarAdapter = LunarPythonAdapter()
+def _pillar(ganzhi: str) -> Pillar:
+    return Pillar(Stem(ganzhi[0]), Branch(ganzhi[1]))
 
 
-def _lazy_adapter() -> CalendarAdapter:
-    """Lazily resolve a usable calendar adapter (lunar_python primary, sxtwl if available)."""
-    global _ADAPTER
-    try:
-        from ..adapters.calendar import SxtwlAdapter
-
-        _ADAPTER = SxtwlAdapter()
-        _ = _ADAPTER.engine_version()
-    except Exception:
-        _ADAPTER = LunarPythonAdapter()
-    return _ADAPTER
+def _resolve_year_pillar(year: int) -> Pillar:
+    lunar = Solar.fromYmdHms(year, 6, 15, 12, 0, 0).getLunar()
+    return _pillar(str(lunar.getYearInGanZhiExact()))
 
 
-def _resolve_year_pillar(year: int, adapter: CalendarAdapter) -> Pillar:
-    """Compute the year pillar for the given civil year using 立春 approximation
-    at 2024-02-04 (we use Jan 1 of the year as a coarse stand-in)."""
+def _resolve_month_pillars(year: int) -> tuple[Pillar, ...]:
+    # Five-tiger-dun months from the exact year's 立春干支 sequence.
+    from lunar_python.eightchar import LiuYue
 
-    utc = datetime(year, 6, 15, 12, 0, tzinfo=UTC)  # mid-year proxy
-    r = adapter.calculate(utc)
-    return r.pillars.year
+    # LiuYue only needs a parent exposing getGanZhi; use a tiny local object.
+    class _Year:
+        def getGanZhi(self) -> str:
+            return _resolve_year_pillar(year).ganzhi
 
-
-def _resolve_month_pillars(year: int, adapter: CalendarAdapter) -> tuple[Pillar, ...]:
-    pillars: list[Pillar] = []
-    for m in range(1, 13):
-        utc = datetime(year, m, 15, 12, 0, tzinfo=__import__("datetime").timezone.utc)
-        r = adapter.calculate(utc)
-        pillars.append(r.pillars.month)
-    return tuple(pillars)
+    return tuple(_pillar(str(LiuYue(_Year(), index).getGanZhi())) for index in range(12))
 
 
 def compute_liuyun(
@@ -66,25 +54,15 @@ def compute_liuyun(
     target_day: int | None = None,
     birth_year: int | None = None,
 ) -> LiuyunContext:
-    """Compute the 流运 context for a target year/month/day.
-
-    `target_year` is required. `target_month`/`target_day` are optional
-    refinements (not used by this initial implementation; reserved for F4).
-    """
-    adapter = _lazy_adapter()
-    year_p = _resolve_year_pillar(target_year, adapter)
-    month_pillars = _resolve_month_pillars(target_year, adapter)
-    # Active 大运: the one whose [start_age, end_age) window covers the age at target_year.
-    # Without an explicit birth year in the call, we approximate by index = year offset.
+    del natal, qiyun_start_age_years, target_month, target_day
     age_at_target = max(0, target_year - birth_year) if birth_year is not None else 0
-    active: DayunPeriod | None = None
-    for p in dayun_periods:
-        if p.start_age <= age_at_target < p.end_age:
-            active = p
-            break
+    active = next(
+        (period for period in dayun_periods if period.start_age <= age_at_target < period.end_age),
+        None,
+    )
     return LiuyunContext(
         target_year=target_year,
-        year_pillar=year_p,
-        month_pillars=month_pillars,
+        year_pillar=_resolve_year_pillar(target_year),
+        month_pillars=_resolve_month_pillars(target_year),
         active_dayun=active,
     )

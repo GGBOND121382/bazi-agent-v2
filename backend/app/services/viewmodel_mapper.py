@@ -45,7 +45,9 @@ def _enriched_details(result: ChartResult) -> dict[str, object]:
     including the LLM pipeline, sees the same per-pillar names and provenance.
     """
     details = dict(result.details)
-    hits = evaluate_shensha(result.pillars)
+    raw_basic = details.get("basic")
+    basic = raw_basic if isinstance(raw_basic, dict) else {}
+    hits = evaluate_shensha(result.pillars, gender=str(basic.get("gender", "unspecified")))
     raw_pillars = details.get("pillars")
     enriched_pillars: list[dict[str, object]] = []
     if isinstance(raw_pillars, list):

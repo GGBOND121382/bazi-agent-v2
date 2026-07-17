@@ -41,7 +41,20 @@ paths:
       summary: Get the backend-assembled chart overview view
   /v1/charts/{chart_id}/temporal/{target_year}:
     get:
-      summary: Get a year and 12 solar-term-month context
+      summary: Get exact 大运、流年、流月 and optional 流日 context with 十神 and 神煞
+      parameters:
+        - in: path
+          name: chart_id
+          required: true
+          schema: {type: string}
+        - in: path
+          name: target_year
+          required: true
+          schema: {type: integer, minimum: 1900, maximum: 2200}
+        - in: query
+          name: target_date
+          required: false
+          schema: {type: string, format: date}
   /v1/charts/{chart_id}/analyses:
     post:
       summary: Start RAG, structured interpretation and verification

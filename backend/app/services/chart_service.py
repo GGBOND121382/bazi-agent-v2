@@ -7,17 +7,16 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import cast
+from dataclasses import replace
+from datetime import date
 
 from ..adapters.storage import ChartStore, InMemoryChartStore
 from ..adapters.time import normalize
 from ..api.dto import BirthRequest, ChartResultDTO, TemporalContextViewDTO
 from ..domain.chart import ChartResult
 from ..domain.errors import InvalidInputError, ProfileError
-from ..domain.pillars import Branch, Pillar, Stem
 from ..domain.profile import CalculationProfile, load_profile
-from ..domain.rules import compute_liuyun
-from ..domain.rules.qiyun_dayun import DayunPeriod
+from ..domain.rules.temporal import build_temporal_context, compute_exact_yun
 from ..domain.time import NormalizedTime
 from .calculate_chart import CalculationDeps, calculate_chart_from_normalized, default_deps
 from .viewmodel_mapper import to_chart_result_dto
@@ -64,6 +63,24 @@ def _ming_gua(year: int, gender: str) -> str:
     return f"男命：{label('male')}；女命：{label('female')}"
 
 
+def _with_exact_yun(chart: ChartResult) -> ChartResult:
+    """Upgrade persisted v1 rounded Yun data on read without a destructive migration."""
+    qiyun = chart.qiyun or {}
+    if qiyun.get("rule_id") == "QIYUN-LUNAR-PYTHON-SECT2-V2":
+        return chart
+    raw_basic = chart.details.get("basic")
+    basic = raw_basic if isinstance(raw_basic, dict) else {}
+    gender = str(basic.get("gender", "unspecified"))
+    try:
+        exact_qiyun, exact_dayun = compute_exact_yun(chart.calculation_time, gender=gender)
+    except (TypeError, ValueError):
+        return chart
+    reference = qiyun.get("reference_jie_utc")
+    if reference:
+        exact_qiyun["reference_jie_utc"] = reference
+    return replace(chart, qiyun=exact_qiyun, dayun=tuple(exact_dayun))
+
+
 class ChartService:
     def __init__(
         self,
@@ -85,7 +102,7 @@ class ChartService:
         """Idempotent create. Returns (dto, chart_id, created_now)."""
         existing = self.store.find_by_idempotency_key(idempotency_key)
         if existing:
-            return to_chart_result_dto(existing.chart), existing.chart_id, False
+            return to_chart_result_dto(_with_exact_yun(existing.chart)), existing.chart_id, False
 
         profile = profile or load_profile()
         if request.calculation_profile_id != profile.profile_id:
@@ -145,7 +162,7 @@ class ChartService:
         stored = self.store.get(chart_id)
         if not stored or stored.deleted:
             raise InvalidInputError(f"chart not found: {chart_id}")
-        return to_chart_result_dto(stored.chart)
+        return to_chart_result_dto(_with_exact_yun(stored.chart))
 
     def list_charts(self) -> list[str]:
         return [s.chart_id for s in self.store.list_for_owner("anonymous")]
@@ -157,7 +174,7 @@ class ChartService:
         stored = self.store.get(chart_id)
         if not stored or stored.deleted:
             raise InvalidInputError(f"chart not found: {chart_id}")
-        return stored.chart
+        return _with_exact_yun(stored.chart)
 
     def set_note(self, chart_id: str, note: str) -> None:
         if len(note) > 500:
@@ -165,65 +182,55 @@ class ChartService:
         if self.store.set_note(chart_id, note) is None:
             raise InvalidInputError("chart not found")
 
-    def get_temporal_context(self, chart_id: str, target_year: int) -> TemporalContextViewDTO:
+    def get_temporal_context(
+        self,
+        chart_id: str,
+        target_year: int,
+        target_date: date | None = None,
+    ) -> TemporalContextViewDTO:
         if target_year < 1900 or target_year > 2200:
             raise InvalidInputError("target year is outside the supported range")
+        if target_date is not None and target_date.year != target_year:
+            raise InvalidInputError("target_date must fall inside target_year")
         chart = self.get_chart_result(chart_id)
-        if chart.calculation_status != "passed" or not chart.qiyun or not chart.dayun:
-            raise InvalidInputError("temporal context requires a validated chart with dayun")
-        periods = tuple(
-            DayunPeriod(
-                index=int(cast(str | int, item["index"])),
-                start_age=int(cast(str | int, item["start_age"])),
-                end_age=int(cast(str | int, item["end_age"])),
-                ganzhi=str(item["ganzhi"]),
-                pillar=Pillar(Stem(str(item["ganzhi"])[0]), Branch(str(item["ganzhi"])[1])),
+        if chart.calculation_status != "passed":
+            raise InvalidInputError("temporal context requires a validated chart")
+        basic_source = chart.details.get("basic")
+        basic = basic_source if isinstance(basic_source, dict) else {}
+        gender = str(basic.get("gender", "unspecified"))
+        try:
+            context = build_temporal_context(
+                chart.pillars,
+                chart.calculation_time,
+                gender=gender,
+                target_year=target_year,
+                target_date=target_date,
             )
-            for item in chart.dayun
-        )
-        context = compute_liuyun(
-            natal=chart.pillars,
-            qiyun_start_age_years=int(cast(str | int, chart.qiyun["start_age_years"])),
-            dayun_periods=periods,
-            target_year=target_year,
-            birth_year=chart.normalized_utc.year,
-        )
-        active = next(
-            (item for item in chart.dayun if context.active_dayun and item["index"] == context.active_dayun.index),
-            None,
-        )
-        year_fact_id = f"LIUNIAN-{target_year}"
-        year = {
-            "ganzhi": context.year_pillar.ganzhi,
-            "stem": context.year_pillar.stem.char,
-            "branch": context.year_pillar.branch.char,
-            "fact_id": year_fact_id,
-            "rule_id": "LIUNIAN-CALENDAR-V1",
-        }
-        months = [
-            {
-                "index": index,
-                "label": f"节气月 {index}",
-                "ganzhi": pillar.ganzhi,
-                "stem": pillar.stem.char,
-                "branch": pillar.branch.char,
-                "fact_id": f"LIUYUE-{target_year}-{index:02d}",
-                "rule_id": "LIUYUE-JIEQI-V1",
-            }
-            for index, pillar in enumerate(context.month_pillars, start=1)
-        ]
+        except (TypeError, ValueError) as exc:
+            raise InvalidInputError(
+                "unable to calculate exact temporal context",
+                safe_details={"reason": str(exc)},
+            ) from exc
+        active = context.get("active_dayun")
+        active_ganzhi = active.get("ganzhi") if isinstance(active, dict) else None
+        year = context["year"]
+        assert isinstance(year, dict)
         breadcrumb = [
             {"level": "natal", "label": "原局", "ganzhi": chart.pillars.day.ganzhi},
-            {"level": "dayun", "label": "大运", "ganzhi": active["ganzhi"] if active else None},
-            {"level": "year", "label": "流年", "ganzhi": context.year_pillar.ganzhi},
+            {"level": "dayun", "label": "大运", "ganzhi": active_ganzhi},
+            {"level": "year", "label": "流年", "ganzhi": year.get("ganzhi")},
         ]
         return TemporalContextViewDTO(
             chart_id=chart_id,
             target_year=target_year,
             breadcrumb=breadcrumb,
-            active_dayun=active,
+            qiyun=context.get("qiyun"),
+            dayuns=context.get("dayuns", []),
+            active_dayun=active if isinstance(active, dict) else None,
             year=year,
-            months=months,
+            months=context.get("months", []),
+            selected_day=context.get("selected_day"),
+            seasonal_strength=context.get("seasonal_strength", {}),
         )
 
     @staticmethod

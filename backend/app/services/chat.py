@@ -5,8 +5,6 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any, Literal, cast
 
-from lunar_python import Solar
-
 from ..adapters.llm import DeepSeekProvider
 from ..adapters.llm.deepseek import StructuredOutputProvider
 from .agent.prompts import FORTUNE_CHAT_PROMPT_VERSION, FORTUNE_CHAT_SYSTEM_PROMPT
@@ -40,15 +38,6 @@ _CHAT_SCHEMA: dict[str, Any] = {
     },
 }
 
-
-def _target_pillars(target: date) -> dict[str, str]:
-    solar = Solar.fromYmdHms(target.year, target.month, target.day, 12, 0, 0)
-    lunar = solar.getLunar()
-    return {
-        "year": str(lunar.getYearInGanZhiExact()),
-        "month": str(lunar.getMonthInGanZhiExact()),
-        "day": str(lunar.getDayInGanZhiExact2()),
-    }
 
 
 def _serialize_evidence(item: RetrievedEvidence) -> dict[str, object]:
@@ -86,8 +75,15 @@ class FortuneChatService:
         school: str = "engineering_policy",
     ) -> dict[str, object]:
         chart = self.chart_service.get_chart(chart_id)
-        temporal = self.chart_service.get_temporal_context(chart_id, target_date.year)
-        target_pillars = _target_pillars(target_date)
+        temporal = self.chart_service.get_temporal_context(
+            chart_id, target_date.year, target_date
+        )
+        selected_day = temporal.selected_day or {}
+        target_pillars = {
+            "year": str(temporal.year.get("ganzhi", "")),
+            "month": str(selected_day.get("month_ganzhi", "")),
+            "day": str(selected_day.get("ganzhi", "")),
+        }
         deterministic_details = chart.calendar.get("deterministic_details", {})
         active_dayun = temporal.active_dayun or {}
         queries = tuple(
@@ -129,6 +125,7 @@ class FortuneChatService:
                 "dayun": active_dayun,
                 "liunian": temporal.year,
                 "liuyue_table": temporal.months,
+                "selected_day": selected_day,
                 "target_pillars": target_pillars,
             },
             "retrieved_evidence": evidence_payload,
@@ -181,6 +178,7 @@ class FortuneChatService:
             "deterministic_context": {
                 "dayun": active_dayun,
                 "year": temporal.year,
+                "selected_day": selected_day,
                 "target_pillars": target_pillars,
             },
             "model_id": response.model_id,

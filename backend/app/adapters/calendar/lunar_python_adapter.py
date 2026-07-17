@@ -249,7 +249,7 @@ class LunarPythonAdapter(CalendarAdapter):
                     "nayin": str(_safe_call(eight_char, f"get{prefix}NaYin", pillar.nayin)),
                     "five_elements": str(_safe_call(eight_char, f"get{prefix}WuXing", "")),
                     "shensha": sorted(
-                        {hit.name for hit in hits if hit.target == pillar.branch.char}
+                        {hit.name for hit in hits if hit.target_position == position}
                     ),
                 }
             )

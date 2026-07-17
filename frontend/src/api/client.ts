@@ -103,10 +103,15 @@ export class BaziClient {
     )
   }
 
-  getTemporalContext(chartId: string, year: number): Promise<TemporalContextViewDTO> {
+  getTemporalContext(
+    chartId: string,
+    year: number,
+    targetDate?: string,
+  ): Promise<TemporalContextViewDTO> {
+    const query = targetDate ? `?target_date=${encodeURIComponent(targetDate)}` : ''
     return this.request<TemporalContextViewDTO>(
       'GET',
-      `/v1/charts/${encodeURIComponent(chartId)}/temporal/${year}`,
+      `/v1/charts/${encodeURIComponent(chartId)}/temporal/${year}${query}`,
     )
   }
 

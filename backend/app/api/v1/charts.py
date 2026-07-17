@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, status
@@ -78,9 +79,10 @@ def get_chart_overview(
 def get_temporal_context(
     chart_id: str,
     target_year: int,
+    target_date: date | None = None,
     svc: ChartService = Depends(_chart_service),
 ) -> TemporalContextViewDTO:
-    return svc.get_temporal_context(chart_id, target_year)
+    return svc.get_temporal_context(chart_id, target_year, target_date)
 
 
 @router.delete("/{chart_id}", status_code=status.HTTP_204_NO_CONTENT)

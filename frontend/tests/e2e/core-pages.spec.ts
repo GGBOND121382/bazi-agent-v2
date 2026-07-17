@@ -53,11 +53,21 @@ async function mockApi(page: Page) {
   // order, so more specific sub-resources registered below take precedence.
   await page.route(/\/api\/v1\/charts\/chart_demo$/, (route) => route.fulfill({ json: chart }))
   await page.route('**/api/v1/charts/chart_demo/overview-view', (route) => route.fulfill({ json: overview }))
-  await page.route('**/api/v1/charts/chart_demo/temporal/2026', (route) => route.fulfill({ json: {
+  const temporalDetail = (ganzhi: string, stemTenGod = '正财', branchTenGod = '正官') => ({
+    ganzhi, stem: ganzhi[0], branch: ganzhi[1], stem_ten_god: stemTenGod, branch_ten_god: branchTenGod,
+    hidden_stems: [{ stem: '甲', ten_god: '正印' }], growth_stage: '帝旺', self_seat: '胎', xunkong: '寅卯', nayin: '天河水',
+    shensha: [{ name: '天乙贵人', rule_id: 'SS1' }], relations: [],
+  })
+  await page.route('**/api/v1/charts/chart_demo/temporal/2026*', (route) => route.fulfill({ json: {
     schema_version: 'temporal-context-view-v1', chart_id: 'chart_demo', target_year: 2026,
     breadcrumb: [{ level: 'natal', label: '原局', ganzhi: '丁亥' }, { level: 'dayun', label: '大运', ganzhi: '辛卯' }, { level: 'year', label: '流年', ganzhi: '丙午' }],
-    active_dayun: { ganzhi: '辛卯' }, year: { ganzhi: '丙午', stem: '丙', branch: '午', fact_id: 'Y2026', rule_id: 'LY' },
-    months: Array.from({ length: 12 }, (_, index) => ({ index: index + 1, label: `节气月 ${index + 1}`, ganzhi: '庚寅', stem: '庚', branch: '寅', fact_id: `M${index + 1}`, rule_id: 'LM' })),
+    qiyun: { direction: 'forward', start_years: 2, start_months: 9, start_days: 17, start_hours: 0, start_datetime: '2002-04-15T12:00:00+08:00' },
+    dayuns: [{ ...temporalDetail('辛卯'), index: 3, start_year: 2022, end_year: 2031, start_age: 24, end_age: 33, fact_id: 'D3', rule_id: 'DY' }],
+    active_dayun: { ...temporalDetail('辛卯'), index: 3, start_year: 2022, end_year: 2031, start_age: 24, end_age: 33, fact_id: 'D3', rule_id: 'DY' },
+    year: { ...temporalDetail('丙午'), year: 2026, age: 28, xiaoyun: '甲戌', fact_id: 'Y2026', rule_id: 'LY' },
+    months: Array.from({ length: 12 }, (_, index) => ({ ...temporalDetail('庚寅'), index: index + 1, label: `${index + 1}月`, jie_name: '立春', start_datetime: `2026-${String(index + 1).padStart(2, '0')}-01T00:00:00+08:00`, end_datetime: `2026-${String(Math.min(index + 2, 12)).padStart(2, '0')}-01T00:00:00+08:00`, fact_id: `M${index + 1}`, rule_id: 'LM' })),
+    selected_day: { ...temporalDetail('壬子'), date: '2026-07-17', lunar_date: '二〇二六年六月初四', month_ganzhi: '乙未', fact_id: 'DAY', rule_id: 'LD' },
+    seasonal_strength: { 木: '休', 火: '旺', 土: '相', 金: '死', 水: '囚' },
   } }))
   await page.route('**/api/v1/charts/chart_demo/chat', async (route) => route.fulfill({ json: {
     answer: '今年事业宜主动争取可量化成果，财务上先稳住现金流，感情沟通避免把工作压力带入关系。',

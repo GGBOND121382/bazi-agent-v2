@@ -168,14 +168,10 @@ class Pillar:
 
     @property
     def nayin(self) -> str:
-        """纳音 — 60-year cycle, two-character 五行 assignment."""
-        # The 60 nayin pairs are indexed by the 甲子 cycle position.
-        # We compute that from the stem index (since stems and branches move in lock-step).
-        pos = self.stem.index  # since stem-branch are aligned in 60 甲子
-        rel = cast(list[str], _stem_branch_relations().get("nayin", []))
-        if not rel:
-            return ""
-        return rel[pos % len(rel)]
+        """Return the 60-cycle 纳音 for this exact 干支."""
+        from lunar_python.util import LunarUtil
+
+        return str(LunarUtil.NAYIN.get(self.ganzhi, ""))
 
     def hidden_stems(self) -> list[Stem]:
         return [Stem(str(h["stem"])) for h in _hidden_stems_table()[self.branch.char]]

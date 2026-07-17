@@ -1,6 +1,6 @@
 {
-  "version": "classics_v2.1",
-  "status": "source_audited_core_with_configurable_variants",
+  "version": "classics_v2.2-app-compatible",
+  "status": "source_audited_with_explicit_app_compatible_variants",
   "scope": "deterministic auxiliary markers for natal four pillars",
   "rule_files": [
     "shensha_classics_v2_stem.json",
@@ -11,6 +11,8 @@
   "policy": {
     "priority": "神煞低于月令、旺衰、格局、用神、十神和干支作用",
     "interpretation": "命中只作为辅助事实，不得由单一神煞直接推出具体事件",
-    "source_strategy": "古籍为主，现代汇编与开源项目仅用于索引和交叉核对"
+    "source_strategy": "古籍为主，现代汇编与开源项目仅用于索引和交叉核对",
+    "natal_anchor_policy": "年支/日支类神煞默认不在其自身锚点柱重复命中；岁运外来柱不作该排除",
+    "variant_policy": "学堂词馆等多口径规则保留查法标签，不把不同流派静默混为一条"
   }
 }

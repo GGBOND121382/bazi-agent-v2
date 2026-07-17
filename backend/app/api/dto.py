@@ -175,9 +175,13 @@ class TemporalContextViewDTO(_Frozen):
     chart_id: str
     target_year: int
     breadcrumb: list[dict[str, Any]]
+    qiyun: dict[str, Any] | None = None
+    dayuns: list[dict[str, Any]] = Field(default_factory=list)
     active_dayun: dict[str, Any] | None = None
     year: dict[str, Any]
     months: list[dict[str, Any]] = Field(min_length=12, max_length=12)
+    selected_day: dict[str, Any] | None = None
+    seasonal_strength: dict[str, str] = Field(default_factory=dict)
 
 
 # ---- ValidationResult ------------------------------------------------------
