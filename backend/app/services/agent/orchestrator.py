@@ -23,9 +23,13 @@ class AnalysisPipelineError(RuntimeError):
 
 
 _RELATION_LABELS = {
+    "stem_combination": "天干五合",
+    "stem_clash": "天干相冲",
     "six_combination": "六合",
     "three_combination": "三合",
+    "half_combination": "半合",
     "three_meeting": "三会",
+    "half_meeting": "半会",
     "clash": "六冲",
     "harm": "六害",
     "break": "相破",
@@ -102,12 +106,32 @@ def _computed_relations(chart: ChartResultDTO) -> list[dict[str, Any]]:
             "branches": list(relation.branches),
             "element": relation.element,
             "rule_id": relation.rule_id,
-            "support_query": "地支"
+            "support_query": ("天干" if relation.type.startswith("stem_") else "地支")
             + "".join(relation.branches)
             + _RELATION_LABELS.get(relation.type, relation.type),
         }
         for index, relation in enumerate(evaluate_relations(pillars), start=1)
     ]
+
+
+def _deterministic_shensha(chart: ChartResultDTO) -> list[dict[str, Any]]:
+    details = chart.calendar.get("deterministic_details", {})
+    if not isinstance(details, dict):
+        return []
+    raw = details.get("shensha", [])
+    if not isinstance(raw, list):
+        return []
+    return [dict(item) for item in raw if isinstance(item, dict)]
+
+
+def _shensha_queries(items: list[dict[str, Any]]) -> tuple[str, ...]:
+    queries = []
+    for item in items:
+        name = str(item.get("name", "")).strip()
+        source = str(item.get("source_title", "")).strip()
+        if name:
+            queries.append(f"{name} 查法 {source}".strip())
+    return tuple(dict.fromkeys(queries))
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +166,8 @@ class AnalysisPipeline:
             raise AnalysisPipelineError("user_focus must contain 1 to 8 topics")
         retrieval_trace_id = f"retrieval_{uuid.uuid4().hex[:12]}"
         computed_relations = _computed_relations(chart)
+        deterministic_details = chart.calendar.get("deterministic_details", {})
+        deterministic_shensha = _deterministic_shensha(chart)
         stem_queries = tuple(
             dict.fromkeys(f"{chart.day_master}日主见{pillar.stem}" for pillar in chart.pillars)
         )
@@ -151,7 +177,8 @@ class AnalysisPipeline:
         relation_queries = tuple(
             str(relation["support_query"]) for relation in computed_relations
         )
-        chart_queries = stem_queries + branch_queries + relation_queries
+        shensha_queries = _shensha_queries(deterministic_shensha)
+        chart_queries = stem_queries + branch_queries + relation_queries + shensha_queries
         plan = RetrievalPlan(queries=chart_queries + user_focus, school=school, top_k=12)
         if on_stage:
             on_stage("retrieving")
@@ -189,7 +216,6 @@ class AnalysisPipeline:
             for channel in RetrievalChannel
         }
         grouped_evidence["conflicting_evidence"] = []
-        deterministic_details = chart.calendar.get("deterministic_details", {})
         input_payload: dict[str, Any] = {
             "chart_id": chart.chart_id,
             "calculation_profile_id": chart.calculation_profile_id,
@@ -197,6 +223,7 @@ class AnalysisPipeline:
             "chart_structure": [pillar.model_dump(mode="json") for pillar in chart.pillars],
             "deterministic_details": deterministic_details,
             "computed_relations": computed_relations,
+            "computed_shensha": deterministic_shensha,
             "retrieved_evidence": [serialize_evidence(item) for item in evidence],
             "retrieval_context": grouped_evidence,
             "retrieval_policy": {
