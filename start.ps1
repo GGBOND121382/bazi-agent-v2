@@ -1,5 +1,5 @@
 <#
-start.ps1 - Start backend and frontend in the background.
+start.ps1 - Start backend and frontend without occupying the caller terminal.
 
 Usage:
     .\start.ps1
@@ -7,9 +7,8 @@ Usage:
     .\start.ps1 -Wait
     .\start.ps1 -BackendPort 9000 -FrontendPort 5174
 
-By default, dependency checks, process startup, and health checks run in a hidden
-background PowerShell process, so the current terminal returns immediately.
-Use -Wait to run startup checks in the current terminal.
+Default mode starts a hidden worker and redirects stdin, stdout, and stderr.
+The caller terminal is released immediately. Use -Wait for foreground diagnostics.
 Compatible with Windows PowerShell 5.1.
 #>
 
@@ -39,9 +38,14 @@ $BackendLog = Join-Path $RuntimeDir 'backend.out.log'
 $BackendErr = Join-Path $RuntimeDir 'backend.err.log'
 $FrontendLog = Join-Path $RuntimeDir 'frontend.out.log'
 $FrontendErr = Join-Path $RuntimeDir 'frontend.err.log'
+$NullInputFile = Join-Path $RuntimeDir 'detached.stdin'
 
 if (-not (Test-Path -LiteralPath $RuntimeDir)) {
     New-Item -ItemType Directory -Path $RuntimeDir | Out-Null
+}
+
+function Initialize-NullInputFile {
+    Set-Content -LiteralPath $NullInputFile -Value '' -Encoding Ascii -NoNewline
 }
 
 function Get-TrackedProcess {
@@ -132,12 +136,10 @@ function Wait-HttpReady {
 
 function Find-PowerShellExecutable {
     $currentProcess = Get-Process -Id $PID -ErrorAction SilentlyContinue
-    $hasCurrentPath = $false
     if ($null -ne $currentProcess) {
-        $hasCurrentPath = -not [string]::IsNullOrWhiteSpace($currentProcess.Path)
-    }
-    if ($hasCurrentPath) {
-        return $currentProcess.Path
+        if (-not [string]::IsNullOrWhiteSpace($currentProcess.Path)) {
+            return $currentProcess.Path
+        }
     }
 
     $windowsPowerShell = Join-Path $PSHOME 'powershell.exe'
@@ -170,6 +172,7 @@ function Start-DetachedWorker {
     }
 
     Assert-PortsAvailable
+    Initialize-NullInputFile
     Remove-Item -LiteralPath $StartupOutLog -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $StartupErrLog -Force -ErrorAction SilentlyContinue
 
@@ -177,6 +180,7 @@ function Start-DetachedWorker {
     $quotedScriptPath = '"{0}"' -f $PSCommandPath
     $arguments = @(
         '-NoProfile',
+        '-NonInteractive',
         '-ExecutionPolicy', 'Bypass',
         '-File', $quotedScriptPath,
         '-Worker',
@@ -190,7 +194,16 @@ function Start-DetachedWorker {
         $arguments += '-Mock'
     }
 
-    $startup = Start-Process -FilePath $powerShellExe -ArgumentList $arguments -WorkingDirectory $ProjectRoot -RedirectStandardOutput $StartupOutLog -RedirectStandardError $StartupErrLog -WindowStyle Hidden -PassThru
+    $startup = Start-Process `
+        -FilePath $powerShellExe `
+        -ArgumentList $arguments `
+        -WorkingDirectory $ProjectRoot `
+        -RedirectStandardInput $NullInputFile `
+        -RedirectStandardOutput $StartupOutLog `
+        -RedirectStandardError $StartupErrLog `
+        -WindowStyle Hidden `
+        -PassThru
+
     $startup.Id | Set-Content -LiteralPath $StartupPidFile -NoNewline
 
     Start-Sleep -Milliseconds 350
@@ -252,6 +265,7 @@ function Start-Backend {
         if (-not (Test-Path -LiteralPath $keyFile)) {
             throw 'DeepSeek key file was not found. Use -Mock for mock mode.'
         }
+
         $resolvedKeyFile = Resolve-Path -LiteralPath $keyFile
         $env:DEEPSEEK_API_KEY = [IO.File]::ReadAllText($resolvedKeyFile).Trim()
         if ([string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY)) {
@@ -274,7 +288,16 @@ function Start-Backend {
             '--port', [string]$BackendPort,
             '--log-level', 'info'
         )
-        $process = Start-Process -FilePath $Python -ArgumentList $arguments -WorkingDirectory $backendDir -RedirectStandardOutput $BackendLog -RedirectStandardError $BackendErr -WindowStyle Hidden -PassThru
+
+        $process = Start-Process `
+            -FilePath $Python `
+            -ArgumentList $arguments `
+            -WorkingDirectory $backendDir `
+            -RedirectStandardInput $NullInputFile `
+            -RedirectStandardOutput $BackendLog `
+            -RedirectStandardError $BackendErr `
+            -WindowStyle Hidden `
+            -PassThru
     } finally {
         if ($hadPreviousKey) {
             $env:DEEPSEEK_API_KEY = $previousKey
@@ -330,7 +353,16 @@ function Start-Frontend {
             '--host', '127.0.0.1',
             '--port', [string]$FrontendPort
         )
-        $process = Start-Process -FilePath $nodeCommand.Source -ArgumentList $arguments -WorkingDirectory $frontendDir -RedirectStandardOutput $FrontendLog -RedirectStandardError $FrontendErr -WindowStyle Hidden -PassThru
+
+        $process = Start-Process `
+            -FilePath $nodeCommand.Source `
+            -ArgumentList $arguments `
+            -WorkingDirectory $frontendDir `
+            -RedirectStandardInput $NullInputFile `
+            -RedirectStandardOutput $FrontendLog `
+            -RedirectStandardError $FrontendErr `
+            -WindowStyle Hidden `
+            -PassThru
     } finally {
         if ($hadPreviousMock) {
             $env:VITE_USE_MOCKS = $previousMock
@@ -351,6 +383,7 @@ function Start-Frontend {
 
 function Invoke-StartWorker {
     Set-Location $ProjectRoot
+    Initialize-NullInputFile
 
     $backendProcess = Get-TrackedProcess -PidFile $BackendPidFile
     $frontendProcess = Get-TrackedProcess -PidFile $FrontendPidFile
@@ -370,14 +403,23 @@ function Invoke-StartWorker {
     $frontend = Start-Frontend
 
     Write-Host 'HEALTH Waiting for backend...' -ForegroundColor Cyan
-    $backendReady = Wait-HttpReady -Uri "http://127.0.0.1:$BackendPort/api/v1/health" -TimeoutSeconds 20 -Description 'backend'
+    $backendReady = Wait-HttpReady `
+        -Uri "http://127.0.0.1:$BackendPort/api/v1/health" `
+        -TimeoutSeconds 20 `
+        -Description 'backend'
     if (-not $backendReady) {
         throw "Backend did not become ready. Logs: $BackendLog / $BackendErr"
     }
 
     Write-Host 'HEALTH Waiting for frontend and API proxy...' -ForegroundColor Cyan
-    $frontendReady = Wait-HttpReady -Uri "http://127.0.0.1:$FrontendPort/" -TimeoutSeconds 20 -Description 'frontend page'
-    $proxyReady = Wait-HttpReady -Uri "http://127.0.0.1:$FrontendPort/api/v1/health" -TimeoutSeconds 10 -Description 'frontend API proxy'
+    $frontendReady = Wait-HttpReady `
+        -Uri "http://127.0.0.1:$FrontendPort/" `
+        -TimeoutSeconds 20 `
+        -Description 'frontend page'
+    $proxyReady = Wait-HttpReady `
+        -Uri "http://127.0.0.1:$FrontendPort/api/v1/health" `
+        -TimeoutSeconds 10 `
+        -Description 'frontend API proxy'
     if ((-not $frontendReady) -or (-not $proxyReady)) {
         throw "Frontend or API proxy did not become ready. Logs: $FrontendLog / $FrontendErr"
     }
@@ -404,7 +446,10 @@ try {
     $exitCode = 1
     Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
     try {
-        & (Join-Path $ProjectRoot 'stop.ps1') -Force -BackendPort $BackendPort -FrontendPort $FrontendPort
+        & (Join-Path $ProjectRoot 'stop.ps1') `
+            -Force `
+            -BackendPort $BackendPort `
+            -FrontendPort $FrontendPort
     } catch {
     }
 } finally {
