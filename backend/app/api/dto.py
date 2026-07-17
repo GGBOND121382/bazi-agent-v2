@@ -115,7 +115,7 @@ class ApiError(_Frozen):
     safe_details: dict[str, Any] | None = None
 
 
-# ---- ChartOverviewView (DTO mirror; the mapper is in services/viewmodels)
+# ---- ChartOverviewView -----------------------------------------------------
 
 
 class PillarViewDTO(_Frozen):
@@ -214,12 +214,36 @@ class ClaimDTO(_Frozen):
     school: str | None = None
 
 
+class ReasoningStepDTO(_Frozen):
+    dimension: str
+    conclusion: str
+    fact_ids: list[str] = Field(default_factory=list)
+    rule_ids: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    counterpoints: list[str] = Field(default_factory=list)
+    confidence: float = Field(ge=0, le=1)
+
+
+class AnalysisReflectionDTO(_Frozen):
+    status: Literal["pass", "revise"]
+    checked_dimensions: list[str] = Field(default_factory=list)
+    missing_dimensions: list[str] = Field(default_factory=list)
+    contradictions: list[str] = Field(default_factory=list)
+    revision_instructions: list[str] = Field(default_factory=list)
+    coverage_scores: dict[str, float] = Field(default_factory=dict)
+
+
 class StructuredAnalysisDTO(_Frozen):
     schema_version: Literal["analysis-output-v1"] = "analysis-output-v1"
     analysis_id: str
     chart_id: str
     school: str
+    executive_summary: str | None = None
+    reasoning_summary: list[ReasoningStepDTO] = Field(default_factory=list)
+    structure_assessment: dict[str, Any] | None = None
+    temporal_assessment: list[dict[str, Any]] = Field(default_factory=list)
     claims: list[ClaimDTO]
+    reflection: AnalysisReflectionDTO | None = None
     limitations: list[str]
 
 
