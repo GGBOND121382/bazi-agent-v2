@@ -1,9 +1,11 @@
 <#
-status.ps1 — 查看后台启动任务和服务状态
+status.ps1 — 查看后台启动任务、后端和前端状态。
 
 用法:
     .\status.ps1
     .\status.ps1 -BackendPort 9000 -FrontendPort 5174
+
+兼容 Windows PowerShell 5.1。
 #>
 
 [CmdletBinding()]
@@ -22,40 +24,54 @@ $StartupPidFile = Join-Path $RuntimeDir 'startup.pid'
 $StartupOutLog = Join-Path $RuntimeDir 'startup.out.log'
 $StartupErrLog = Join-Path $RuntimeDir 'startup.err.log'
 
-function Resolve-Port {
+function Resolve-ServicePort {
     param(
         [int]$ExplicitPort,
         [string]$PortFile,
         [int]$DefaultPort
     )
 
-    if ($ExplicitPort -gt 0) { return $ExplicitPort }
-    if (Test-Path $PortFile) {
-        $value = (Get-Content $PortFile -Raw).Trim()
+    if ($ExplicitPort -gt 0) {
+        return $ExplicitPort
+    }
+
+    if (Test-Path -LiteralPath $PortFile) {
+        $value = (Get-Content -LiteralPath $PortFile -Raw).Trim()
         if ($value -match '^\d+$') {
             $parsed = [int]$value
-            if ($parsed -ge 1 -and $parsed -le 65535) { return $parsed }
+            if (($parsed -ge 1) -and ($parsed -le 65535)) {
+                return $parsed
+            }
         }
     }
+
     return $DefaultPort
 }
-
-$ResolvedBackendPort = Resolve-Port `
-    -ExplicitPort $BackendPort `
-    -PortFile $BackendPortFile `
-    -DefaultPort 8000
-$ResolvedFrontendPort = Resolve-Port `
-    -ExplicitPort $FrontendPort `
-    -PortFile $FrontendPortFile `
-    -DefaultPort 5173
 
 function Get-TrackedProcess {
     param([string]$PidFile)
 
-    if (-not (Test-Path $PidFile)) { return $null }
-    $procId = (Get-Content $PidFile -Raw).Trim()
-    if ($procId -notmatch '^\d+$') { return $null }
-    return Get-Process -Id ([int]$procId) -ErrorAction SilentlyContinue
+    if (-not (Test-Path -LiteralPath $PidFile)) {
+        return $null
+    }
+
+    $value = (Get-Content -LiteralPath $PidFile -Raw).Trim()
+    if ($value -notmatch '^\d+$') {
+        return $null
+    }
+
+    return Get-Process -Id ([int]$value) -ErrorAction SilentlyContinue
+}
+
+function Get-PortOwners {
+    param([int]$Port)
+
+    $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+    if ($listeners.Count -eq 0) {
+        return @()
+    }
+
+    return @($listeners | Select-Object -ExpandProperty OwningProcess -Unique)
 }
 
 function Show-StartupState {
@@ -67,12 +83,12 @@ function Show-StartupState {
         return
     }
 
-    if (Test-Path $StartupPidFile) {
-        Remove-Item $StartupPidFile -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $StartupPidFile) {
+        Remove-Item -LiteralPath $StartupPidFile -Force -ErrorAction SilentlyContinue
     }
 }
 
-function Show-One {
+function Show-ServiceState {
     param(
         [string]$Name,
         [string]$PidFile,
@@ -82,43 +98,50 @@ function Show-One {
     $process = Get-TrackedProcess -PidFile $PidFile
     if ($null -ne $process) {
         $uptime = (Get-Date) - $process.StartTime
-        Write-Host ("UP      {0,-10} pid={1,-7} port={2,-5} 已运行 {3:hh\:mm\:ss}" -f `
-            $Name, $process.Id, $Port, $uptime) -ForegroundColor Green
+        Write-Host ("UP       {0,-10} pid={1,-7} port={2,-5} 已运行 {3:hh\:mm\:ss}" -f $Name, $process.Id, $Port, $uptime) -ForegroundColor Green
         return
     }
 
-    $listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-    if ($null -ne $listeners) {
-        $processIds = @($listeners | Select-Object -ExpandProperty OwningProcess -Unique)
-        Write-Host "ORPHAN  $Name 端口 $Port 被 PID $($processIds -join ',') 占用，无有效 PID 跟踪" -ForegroundColor Yellow
+    $owners = @(Get-PortOwners -Port $Port)
+    if ($owners.Count -gt 0) {
+        Write-Host "ORPHAN   $Name 端口 $Port 被 PID $($owners -join ',') 占用，无有效 PID 跟踪" -ForegroundColor Yellow
+        foreach ($processIdValue in $owners) {
+            $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$processIdValue" -ErrorAction SilentlyContinue
+            if ($null -ne $cim) {
+                Write-Host "         $($cim.CommandLine)" -ForegroundColor DarkYellow
+            }
+        }
         return
     }
 
-    Write-Host "DOWN    $Name 未运行 (port $Port)" -ForegroundColor DarkGray
+    Write-Host "DOWN     $Name 未运行 (port $Port)" -ForegroundColor DarkGray
 }
+
+$ResolvedBackendPort = Resolve-ServicePort -ExplicitPort $BackendPort -PortFile $BackendPortFile -DefaultPort 8000
+$ResolvedFrontendPort = Resolve-ServicePort -ExplicitPort $FrontendPort -PortFile $FrontendPortFile -DefaultPort 5173
 
 Show-StartupState
-Show-One -Name 'backend' -PidFile $BackendPidFile -Port $ResolvedBackendPort
-Show-One -Name 'frontend' -PidFile $FrontendPidFile -Port $ResolvedFrontendPort
+Show-ServiceState -Name 'backend' -PidFile $BackendPidFile -Port $ResolvedBackendPort
+Show-ServiceState -Name 'frontend' -PidFile $FrontendPidFile -Port $ResolvedFrontendPort
 
 try {
-    $response = Invoke-WebRequest `
-        -Uri "http://127.0.0.1:$ResolvedBackendPort/api/v1/health" `
-        -UseBasicParsing `
-        -TimeoutSec 2
-    Write-Host "HEALTH  backend /api/v1/health -> $($response.StatusCode)" -ForegroundColor Green
+    $response = Invoke-WebRequest -Uri "http://127.0.0.1:$ResolvedBackendPort/api/v1/health" -UseBasicParsing -TimeoutSec 2
+    Write-Host "HEALTH   backend /api/v1/health -> $($response.StatusCode)" -ForegroundColor Green
 } catch {
-    Write-Host 'HEALTH  backend /api/v1/health 不可达' -ForegroundColor Red
+    Write-Host 'HEALTH   backend /api/v1/health 不可达' -ForegroundColor Red
 }
 
-if ((Get-TrackedProcess -PidFile $StartupPidFile) -eq $null -and
-    (Get-TrackedProcess -PidFile $BackendPidFile) -eq $null -and
-    (Get-TrackedProcess -PidFile $FrontendPidFile) -eq $null) {
-    if (Test-Path $StartupErrLog) {
-        $lastError = Get-Content $StartupErrLog -Tail 8 -ErrorAction SilentlyContinue
-        if ($null -ne $lastError -and $lastError.Count -gt 0) {
-            Write-Host 'LAST ERROR:' -ForegroundColor Yellow
-            $lastError | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkYellow }
+$startupProcess = Get-TrackedProcess -PidFile $StartupPidFile
+$backendProcess = Get-TrackedProcess -PidFile $BackendPidFile
+$frontendProcess = Get-TrackedProcess -PidFile $FrontendPidFile
+$allTrackedProcessesDown = (($null -eq $startupProcess) -and ($null -eq $backendProcess) -and ($null -eq $frontendProcess))
+
+if ($allTrackedProcessesDown -and (Test-Path -LiteralPath $StartupErrLog)) {
+    $lastError = @(Get-Content -LiteralPath $StartupErrLog -Tail 8 -ErrorAction SilentlyContinue)
+    if ($lastError.Count -gt 0) {
+        Write-Host 'LAST ERROR:' -ForegroundColor Yellow
+        foreach ($line in $lastError) {
+            Write-Host "  $line" -ForegroundColor DarkYellow
         }
     }
 }
