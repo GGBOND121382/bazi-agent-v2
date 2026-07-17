@@ -21,8 +21,12 @@ $FrontendPidFile = Join-Path $RuntimeDir 'frontend.pid'
 $BackendPortFile = Join-Path $RuntimeDir 'backend.port'
 $FrontendPortFile = Join-Path $RuntimeDir 'frontend.port'
 $StartupPidFile = Join-Path $RuntimeDir 'startup.pid'
+$StartupStateFile = Join-Path $RuntimeDir 'startup.state'
+$StartupMessageFile = Join-Path $RuntimeDir 'startup.message'
 $StartupOutLog = Join-Path $RuntimeDir 'startup.out.log'
 $StartupErrLog = Join-Path $RuntimeDir 'startup.err.log'
+$BackendErrLog = Join-Path $RuntimeDir 'backend.err.log'
+$FrontendErrLog = Join-Path $RuntimeDir 'frontend.err.log'
 
 function Resolve-ServicePort {
     param(
@@ -74,18 +78,73 @@ function Get-PortOwners {
     return @($listeners | Select-Object -ExpandProperty OwningProcess -Unique)
 }
 
+function Read-OptionalText {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return ''
+    }
+
+    return (Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue).Trim()
+}
+
+function Show-LogTail {
+    param(
+        [string]$Label,
+        [string]$Path,
+        [int]$Tail = 12
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+
+    $lines = @(Get-Content -LiteralPath $Path -Tail $Tail -ErrorAction SilentlyContinue)
+    if ($lines.Count -eq 0) {
+        return
+    }
+
+    Write-Host "$Label ($Path):" -ForegroundColor Yellow
+    foreach ($line in $lines) {
+        Write-Host "  $line" -ForegroundColor DarkYellow
+    }
+}
+
 function Show-StartupState {
     $process = Get-TrackedProcess -PidFile $StartupPidFile
     if ($null -ne $process) {
         $uptime = (Get-Date) - $process.StartTime
         Write-Host ("STARTING startup pid={0} uptime={1:hh\:mm\:ss}" -f $process.Id, $uptime) -ForegroundColor Cyan
         Write-Host "         log: Get-Content '$StartupOutLog' -Wait" -ForegroundColor DarkCyan
-        return
+        return 'starting'
     }
 
     if (Test-Path -LiteralPath $StartupPidFile) {
         Remove-Item -LiteralPath $StartupPidFile -Force -ErrorAction SilentlyContinue
     }
+
+    $state = Read-OptionalText -Path $StartupStateFile
+    $message = Read-OptionalText -Path $StartupMessageFile
+
+    if ($state -eq 'failed') {
+        if ([string]::IsNullOrWhiteSpace($message)) {
+            $message = 'Detached startup failed without a recorded message.'
+        }
+        Write-Host "FAILED   startup: $message" -ForegroundColor Red
+        Write-Host "         output: Get-Content '$StartupOutLog' -Tail 200" -ForegroundColor DarkYellow
+        Write-Host "         error:  Get-Content '$StartupErrLog' -Tail 200" -ForegroundColor DarkYellow
+        return 'failed'
+    }
+
+    if ($state -eq 'starting') {
+        Write-Host 'STALE    startup state is starting, but the worker process is no longer running' -ForegroundColor Yellow
+        if (-not [string]::IsNullOrWhiteSpace($message)) {
+            Write-Host "         $message" -ForegroundColor DarkYellow
+        }
+        return 'stale'
+    }
+
+    return $state
 }
 
 function Show-ServiceState {
@@ -120,7 +179,7 @@ function Show-ServiceState {
 $ResolvedBackendPort = Resolve-ServicePort -ExplicitPort $BackendPort -PortFile $BackendPortFile -DefaultPort 8000
 $ResolvedFrontendPort = Resolve-ServicePort -ExplicitPort $FrontendPort -PortFile $FrontendPortFile -DefaultPort 5173
 
-Show-StartupState
+$StartupState = Show-StartupState
 Show-ServiceState -Name 'backend' -PidFile $BackendPidFile -Port $ResolvedBackendPort
 Show-ServiceState -Name 'frontend' -PidFile $FrontendPidFile -Port $ResolvedFrontendPort
 
@@ -136,12 +195,13 @@ $backendProcess = Get-TrackedProcess -PidFile $BackendPidFile
 $frontendProcess = Get-TrackedProcess -PidFile $FrontendPidFile
 $allTrackedProcessesDown = (($null -eq $startupProcess) -and ($null -eq $backendProcess) -and ($null -eq $frontendProcess))
 
-if ($allTrackedProcessesDown -and (Test-Path -LiteralPath $StartupErrLog)) {
-    $lastError = @(Get-Content -LiteralPath $StartupErrLog -Tail 8 -ErrorAction SilentlyContinue)
-    if ($lastError.Count -gt 0) {
-        Write-Host 'LAST ERROR:' -ForegroundColor Yellow
-        foreach ($line in $lastError) {
-            Write-Host "  $line" -ForegroundColor DarkYellow
-        }
+if ($allTrackedProcessesDown) {
+    if ($StartupState -eq 'failed') {
+        Show-LogTail -Label 'STARTUP OUTPUT' -Path $StartupOutLog
+        Show-LogTail -Label 'STARTUP ERROR' -Path $StartupErrLog
+        Show-LogTail -Label 'BACKEND ERROR' -Path $BackendErrLog
+        Show-LogTail -Label 'FRONTEND ERROR' -Path $FrontendErrLog
+    } elseif (Test-Path -LiteralPath $StartupErrLog) {
+        Show-LogTail -Label 'LAST STARTUP ERROR' -Path $StartupErrLog -Tail 8
     }
 }
