@@ -119,6 +119,7 @@ class FortuneChatService:
         temporal_payload = {
             "qiyun": temporal.qiyun,
             "dayun_table": temporal.dayuns,
+            "dayun": active_dayun,
             "active_dayun": active_dayun,
             "liunian": temporal.year,
             "liuyue_table": temporal.months,
@@ -144,7 +145,6 @@ class FortuneChatService:
             "scope": scope,
             "target_date": target_date.isoformat(),
             "analysis_context": analysis_context,
-            # Compatibility fields for existing providers and recorded fixtures.
             "natal_chart": natal_payload,
             "temporal_context": temporal_payload,
             "retrieved_evidence": evidence_payload,
