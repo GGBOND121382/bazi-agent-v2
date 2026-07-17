@@ -6,45 +6,7 @@ on:
   pull_request:
     branches: [main]
 
-permissions:
-  contents: write
-
 jobs:
-  apply_temporal_audit:
-    if: github.event_name == 'push' && github.event.head_commit.message != 'feat: correct exact temporal and shensha calculations'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: agent/mobile-ui-deterministic-chat
-          fetch-depth: 0
-      - name: Apply audited temporal and shensha patch
-        shell: bash
-        run: |
-          set -euxo pipefail
-          exec > >(tee /tmp/apply.log) 2>&1
-          git merge --no-edit origin/main
-          cat .github/temporal_patch/chunk_* | base64 -d > /tmp/temporal.patch.gz
-          gzip -t /tmp/temporal.patch.gz
-          gzip -dc /tmp/temporal.patch.gz > /tmp/temporal.patch
-          git apply --3way /tmp/temporal.patch
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add backend contracts frontend docs
-          git commit -m "feat: correct exact temporal and shensha calculations"
-          git push origin HEAD:agent/mobile-ui-deterministic-chat
-      - name: Upload apply diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: temporal-apply-diagnostics
-          path: |
-            /tmp/apply.log
-            /tmp/temporal.patch
-          if-no-files-found: warn
-          retention-days: 1
-
   smoke:
     runs-on: windows-latest
     timeout-minutes: 15
