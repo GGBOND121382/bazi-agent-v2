@@ -1,4 +1,4 @@
-"""Report assembler selecting only claims that passed identifier validation."""
+"""Report assembler selecting only deterministically approved claims."""
 from __future__ import annotations
 
 import uuid
@@ -26,8 +26,9 @@ class ReportAssembler:
         allowed = set(validation.approved_claim_ids)
         if allowed != {claim.claim_id for claim in analysis.claims}:
             raise ValueError("formal report requires every claim to be approved")
+
         evidence_index = {item.chunk_id: item for item in evidence}
-        blocks = [
+        claim_blocks = [
             {
                 "block_type": "claim",
                 "claim_id": claim.claim_id,
@@ -42,6 +43,69 @@ class ReportAssembler:
             }
             for claim in analysis.claims
         ]
+        sections: list[dict[str, Any]] = []
+        if analysis.executive_summary:
+            sections.append(
+                {
+                    "section_id": "summary",
+                    "title": "命局总论",
+                    "content_blocks": [
+                        {"block_type": "summary", "content": analysis.executive_summary}
+                    ],
+                }
+            )
+        if analysis.reasoning_summary or analysis.structure_assessment:
+            sections.append(
+                {
+                    "section_id": "structure",
+                    "title": "旺衰、格局与喜用",
+                    "content_blocks": [
+                        {
+                            "block_type": "structure_assessment",
+                            "content": analysis.structure_assessment or {},
+                        },
+                        *[
+                            {
+                                "block_type": "reasoning_step",
+                                **step.model_dump(mode="json"),
+                            }
+                            for step in analysis.reasoning_summary
+                        ],
+                    ],
+                }
+            )
+        if analysis.temporal_assessment:
+            sections.append(
+                {
+                    "section_id": "temporal",
+                    "title": "大运流年流月流日",
+                    "content_blocks": [
+                        {"block_type": "temporal_assessment", "content": item}
+                        for item in analysis.temporal_assessment
+                    ],
+                }
+            )
+        sections.append(
+            {
+                "section_id": "analysis",
+                "title": "主题综合分析",
+                "content_blocks": claim_blocks,
+            }
+        )
+        if analysis.reflection is not None:
+            sections.append(
+                {
+                    "section_id": "quality",
+                    "title": "分析完整性检查",
+                    "content_blocks": [
+                        {
+                            "block_type": "reflection_summary",
+                            "content": analysis.reflection.model_dump(mode="json"),
+                        }
+                    ],
+                }
+            )
+
         used_evidence = sorted({eid for claim in analysis.claims for eid in claim.evidence_ids})
         return {
             "schema_version": "report-v1",
@@ -60,9 +124,7 @@ class ReportAssembler:
                 "calculation_status": chart.calculation_status,
                 "warning_codes": [warning.code for warning in chart.warnings],
             },
-            "sections": [
-                {"section_id": "analysis", "title": "命理综合分析", "content_blocks": blocks}
-            ],
+            "sections": sections,
             "citations": [
                 {
                     "evidence_id": evidence_id,
@@ -75,7 +137,5 @@ class ReportAssembler:
                 for evidence_id in used_evidence
                 if evidence_id in evidence_index
             ],
-            # Only show limitations the model identified from genuinely missing
-            # data or conflicting schools. Do not append generic audit boilerplate.
             "limitations": list(analysis.limitations),
         }
