@@ -129,7 +129,7 @@ function relationText(item: TemporalPillarDetailDTO): string {
       </section>
 
       <section class="card-surface day-picker-panel">
-        <header><div><p class="eyebrow">逐日查询</p><h2>流日十神与神煞</h2></div><input v-model="selectedDate" type="date" :min="`${year}-01-01`" :max="`${year}-12-31`" /></header>
+        <header><div><p class="eyebrow">逐日查询</p><h2>流日十神与神煞</h2></div><input v-model="selectedDate" type="date" aria-label="选择流日" :min="`${year}-01-01`" :max="`${year}-12-31`" /></header>
         <article v-if="data.selected_day" class="flow-day-card">
           <div><span>{{ data.selected_day.date }} · {{ data.selected_day.lunar_date }}</span><strong>{{ data.selected_day.ganzhi }}</strong><small>{{ data.selected_day.stem_ten_god }} / {{ data.selected_day.branch_ten_god }}</small></div>
           <dl><div><dt>藏干十神</dt><dd>{{ data.selected_day.hidden_stems.map((item) => `${item.stem}${item.ten_god}`).join('　') }}</dd></div><div><dt>星运 / 自坐</dt><dd>{{ data.selected_day.growth_stage }} / {{ data.selected_day.self_seat }}</dd></div><div><dt>纳音 / 空亡</dt><dd>{{ data.selected_day.nayin }} / {{ data.selected_day.xunkong }}</dd></div><div><dt>流日神煞</dt><dd>{{ names(data.selected_day.shensha) }}</dd></div><div><dt>原局作用</dt><dd>{{ relationText(data.selected_day) }}</dd></div></dl>
