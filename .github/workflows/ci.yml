@@ -57,9 +57,17 @@ jobs:
         shell: powershell
         run: |
           $startScript = Get-Content -LiteralPath start.ps1 -Raw
-          $redirectCount = ([regex]::Matches($startScript, '-RedirectStandardInput\s+\$NullInputFile')).Count
-          if ($redirectCount -lt 3) {
-            throw "start.ps1 must redirect stdin for worker, backend, and frontend; found $redirectCount occurrences."
+          $expectedRedirects = @(
+            @{ Name = 'startup worker'; Variable = '$WorkerInputFile' },
+            @{ Name = 'backend'; Variable = '$BackendInputFile' },
+            @{ Name = 'frontend'; Variable = '$FrontendInputFile' }
+          )
+          foreach ($expected in $expectedRedirects) {
+            $pattern = '-RedirectStandardInput\s+' + [regex]::Escape($expected.Variable)
+            $count = ([regex]::Matches($startScript, $pattern)).Count
+            if ($count -ne 1) {
+              throw "start.ps1 must redirect stdin for $($expected.Name) through $($expected.Variable); found $count occurrences."
+            }
           }
 
           $testDir = Join-Path $env:RUNNER_TEMP 'bazi-detached-stdin-test'
