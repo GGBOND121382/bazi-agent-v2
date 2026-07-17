@@ -5,9 +5,8 @@ from typing import Any
 
 from app.adapters.llm import ProviderResponse
 from app.api.dto import ChartResultDTO, EngineVersionDTO, FactDTO, PillarDTO, StructuredAnalysisDTO
-from app.services.rag.models import RetrievalChannel, RetrievalPlan, RetrievedEvidence
-
 from app.services.agent import AnalysisPipeline, verify_analysis
+from app.services.rag.models import RetrievalChannel, RetrievalPlan, RetrievedEvidence
 
 
 def _chart() -> ChartResultDTO:
