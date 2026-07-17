@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from ...adapters.llm.deepseek import ProviderResponse, StructuredOutputProvider
 from ...api.dto import ChartResultDTO, StructuredAnalysisDTO, ValidationResultDTO
@@ -43,12 +43,13 @@ _RELATION_LABELS = {
     "punishment": "相刑",
 }
 _REVISION_GUIDANCE = {
-    "UNKNOWN_FACT": "fact_ids 只能使用确定性上下文中的事实 ID。",
-    "UNKNOWN_RULE": "rule_ids 只能使用输入中的规则或 A/B 级证据 ID。",
-    "UNKNOWN_EVIDENCE": "evidence_ids 只能使用 retrieved_evidence 中的 ID。",
-    "MISSING_INTERPRETIVE_SUPPORT": "补充有效规则/证据；无依据时删除判断。",
-    "NON_AUTHORITATIVE_RULE": "C 级案例只能作为 evidence_ids。",
-    "CLAIM_SCHOOL_MISMATCH": "claim.school 与分析流派保持一致。",
+    "UNKNOWN_FACT": "fact_ids 只能使用 allowed_reference_ids.fact_ids 中的确定性事实 ID。",
+    "UNKNOWN_RULE": "rule_ids 只能使用 allowed_reference_ids.rule_ids 中的确定性规则或 A/B 级证据 ID。",
+    "UNKNOWN_EVIDENCE": "evidence_ids 只能使用 allowed_reference_ids.evidence_ids 中的已检索证据 ID。",
+    "MISSING_INTERPRETIVE_SUPPORT": "为该 claim 补充 allowed_reference_ids 中真实存在的 rule_id/evidence_id；若无可用支撑，删除该 claim。",
+    "NON_AUTHORITATIVE_RULE": "C 级案例只能作为 evidence_ids；rule_ids 只能引用确定性规则或 A/B 级证据。",
+    "SCHOOL_MISMATCH": "analysis.school 必须逐字等于 analysis_profile.school；methodology_priority 不是 school 的可选值。",
+    "CLAIM_SCHOOL_MISMATCH": "claim.school 应省略，或逐字等于 analysis_profile.school；不得填写 methodology_priority。",
     "POLICY_HIGH_RISK_ASSERTION": "改为条件、趋势和风险提示。",
 }
 
@@ -103,6 +104,43 @@ def _serialize(item: RetrievedEvidence) -> dict[str, Any]:
             "can_support_case_analogy": item.can_support_case_analogy,
             "can_supply_explanation": item.can_supply_explanation,
         },
+    }
+
+
+def _walk_dicts(value: object) -> Iterator[dict[str, Any]]:
+    if isinstance(value, dict):
+        item = cast(dict[str, Any], value)
+        yield item
+        for child in item.values():
+            yield from _walk_dicts(child)
+    elif isinstance(value, list | tuple):
+        for child in value:
+            yield from _walk_dicts(child)
+
+
+def _reference_catalog(
+    context: dict[str, Any], evidence: tuple[RetrievedEvidence, ...]
+) -> dict[str, list[str]]:
+    """Expose exactly the identifiers that the deterministic validator can accept."""
+    fact_ids: set[str] = set()
+    deterministic_rule_ids: set[str] = set()
+    for item in _walk_dicts(context):
+        fact_id = item.get("fact_id")
+        rule_id = item.get("rule_id")
+        if fact_id:
+            fact_ids.add(str(fact_id))
+        if rule_id:
+            deterministic_rule_ids.add(str(rule_id))
+
+    authoritative_evidence_ids = {
+        item.chunk_id
+        for item in evidence
+        if item.can_support_claim and item.trust_tier in {"A", "B"}
+    }
+    return {
+        "fact_ids": sorted(fact_ids),
+        "rule_ids": sorted(deterministic_rule_ids | authoritative_evidence_ids),
+        "evidence_ids": sorted(item.chunk_id for item in evidence),
     }
 
 
@@ -200,6 +238,7 @@ class AnalysisPipeline:
             for channel in RetrievalChannel
         }
         grouped["conflicting_evidence"] = []
+        allowed_reference_ids = _reference_catalog(context, evidence)
         payload: dict[str, Any] = {
             "chart_id": chart.chart_id,
             "calculation_profile_id": chart.calculation_profile_id,
@@ -214,7 +253,7 @@ class AnalysisPipeline:
             },
             "analysis_profile": {
                 "school": school,
-                "primary_method": "ziping_structure_first",
+                "methodology_priority": "ziping_structure_first",
                 "supporting_methods": [
                     "seasonal_strength",
                     "tiao_hou",
@@ -225,6 +264,13 @@ class AnalysisPipeline:
                 "nayin_role": "secondary_only",
                 "shensha_role": "auxiliary_only",
             },
+            "output_contract": {
+                "analysis_school_must_equal": school,
+                "claim_school": f"omit or exactly equal {school}",
+                "methodology_priority_is_not_school": True,
+                "unsupported_claim_action": "add a legal rule/evidence reference or delete the claim",
+            },
+            "allowed_reference_ids": allowed_reference_ids,
             "professional_rubric": PROFESSIONAL_RUBRIC,
             "user_focus": list(user_focus),
         }
