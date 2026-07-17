@@ -131,7 +131,12 @@ class ChartService:
                 "timezone": request.timezone,
                 "time_precision": request.time_precision,
                 "time_basis": calculated.time_basis,
-                "true_solar_time": calculated.calculation_time.isoformat(),
+                "civil_time": nt.local_civil.isoformat(),
+                "local_mean_solar_time": (
+                    nt.local_mean_solar.isoformat() if nt.local_mean_solar is not None else None
+                ),
+                "true_solar_time": nt.true_solar.isoformat() if nt.true_solar is not None else None,
+                "calculation_time": calculated.calculation_time.isoformat(),
                 "birthplace": request.birthplace.model_dump(exclude_none=True),
                 "ming_gua": _ming_gua(request.birth_datetime_local.year, request.gender),
             }
@@ -243,11 +248,11 @@ class ChartService:
         if local_dt.tzinfo is None:
             try:
                 tz = ZoneInfo(request.timezone)
-            except ZoneInfoNotFoundError as e:
+            except ZoneInfoNotFoundError as exc:
                 raise TimeError(
                     f"unknown timezone: {request.timezone}",
                     safe_details={"hint": "use IANA name like Asia/Shanghai"},
-                ) from e
+                ) from exc
             local_dt = local_dt.replace(tzinfo=tz)
         return normalize(
             local_dt=local_dt,
