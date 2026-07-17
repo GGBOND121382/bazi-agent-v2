@@ -16,7 +16,10 @@
     "schema_version": {"const": "analysis-output-v1"},
     "analysis_id": {"type": "string"},
     "chart_id": {"type": "string"},
-    "school": {"type": "string"},
+    "school": {
+      "type": "string",
+      "description": "Must exactly equal input analysis_profile.school. It is not the methodology_priority value."
+    },
     "executive_summary": {"type": ["string", "null"]},
     "reasoning_summary": {
       "type": "array",
@@ -69,7 +72,10 @@
           "counterevidence": {"type": "array", "items": {"type": "string"}},
           "confidence": {"type": "number", "minimum": 0, "maximum": 1},
           "temporal_scope": {"type": "string"},
-          "school": {"type": "string"}
+          "school": {
+            "type": "string",
+            "description": "Optional. Omit it or make it exactly equal input analysis_profile.school; never use methodology_priority."
+          }
         }
       }
     },
