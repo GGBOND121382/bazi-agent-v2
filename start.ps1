@@ -154,9 +154,11 @@ function Assert-PortsAvailable {
 }
 
 function Assert-NoTrackedProcesses {
-    $startup = Get-TrackedProcess -PidFile $StartupPidFile
-    if ($null -ne $startup) {
-        throw "A startup worker is already running, PID=$($startup.Id). Run .\status.ps1."
+    if (-not $Worker) {
+        $startup = Get-TrackedProcess -PidFile $StartupPidFile
+        if ($null -ne $startup) {
+            throw "A startup worker is already running, PID=$($startup.Id). Run .\status.ps1."
+        }
     }
 
     $backend = Get-TrackedProcess -PidFile $BackendPidFile
