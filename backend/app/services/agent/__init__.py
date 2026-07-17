@@ -1,6 +1,6 @@
 """Professional structured analysis, deterministic verification, and reports."""
 
-from .professional_orchestrator import (
+from .professional_core import (
     AnalysisPipeline,
     AnalysisPipelineError,
     AnalysisPipelineResult,
