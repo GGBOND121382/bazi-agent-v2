@@ -1,9 +1,8 @@
-"""Branch relations: 六合, 三合, 六冲, 六害, 相刑, 自刑.
+"""Deterministic 天干地支 relations.
 
-Pure functions; no I/O. Uses `contracts/core_tables/stem_branch_relations.json`.
-
-Combination is a *relation candidate*; transformation is a separate decision
-governed by the CalculationProfile (`combination_means_transformation` flag).
+Covers 天干五合/相冲 and 地支六合、三合、半合、三会、半会、六冲、
+六害、相破、相刑、自刑. A combination is only a relation candidate;
+whether it transforms is a separate profile/interpretation decision.
 """
 from __future__ import annotations
 
@@ -11,6 +10,7 @@ import json
 from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from functools import lru_cache
+from itertools import combinations
 from pathlib import Path
 from typing import Any, cast
 
@@ -18,6 +18,7 @@ from ..pillars import FourPillars
 
 CORE_TABLES = Path(__file__).resolve().parents[4] / "contracts" / "core_tables"
 REL_FILE = CORE_TABLES / "stem_branch_relations.json"
+_STEM_CLASHES = (("甲", "庚"), ("乙", "辛"), ("丙", "壬"), ("丁", "癸"))
 
 
 @lru_cache(maxsize=1)
@@ -27,138 +28,189 @@ def _relations() -> dict[str, Any]:
 
 @dataclass(frozen=True, slots=True)
 class BranchRelation:
-    type: str  # 'six_combination' | 'three_combination' | 'clash' | 'harm' | 'break' | 'punishment'
+    """A relation among visible stems or branches.
+
+    The historical class name is retained for API compatibility. `branches`
+    contains the participating characters, including stems for stem relations.
+    """
+
+    type: str
     branches: tuple[str, ...]
-    element: str | None  # for combinations
+    element: str | None
     rule_id: str
 
 
-def _branch_set(*branches: str) -> tuple[str, ...]:
-    return tuple(sorted(set(branches)))
+def _ordered_unique(*values: str) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(values))
 
 
-def _pair_in(branches: Collection[str], pair: Iterable[str]) -> bool:
-    """True if all of `pair` appear in `branches`."""
-    return all(b in branches for b in pair)
+def _pair_in(values: Collection[str], pair: Iterable[str]) -> bool:
+    return all(value in values for value in pair)
+
+
+def _full_group_present(values: Collection[str], group: list[object]) -> bool:
+    return all(str(value) in values for value in group)
 
 
 def evaluate_relations(pillars: FourPillars) -> list[BranchRelation]:
-    """Walk the four 柱 and emit all relations involving at least two branches."""
-    branches: list[str] = [str(p.branch) for p in pillars.as_list()]
-    seen_branches: set[str] = set(branches)
+    """Emit all configured visible-stem and visible-branch relations."""
+    stems = [pillar.stem.char for pillar in pillars.as_list()]
+    branches = [pillar.branch.char for pillar in pillars.as_list()]
+    seen_stems = set(stems)
+    seen_branches = set(branches)
     rels = _relations()
     hits: list[BranchRelation] = []
 
-    # Six combinations (六合) — element candidate
+    # 天干五合. 化气 is only a candidate element, never asserted as completed.
+    for combo in rels.get("stem_five_combinations", []):
+        if not isinstance(combo, dict):
+            continue
+        pair = [str(value) for value in combo.get("pair", [])]
+        if len(pair) == 2 and _pair_in(seen_stems, pair):
+            hits.append(
+                BranchRelation(
+                    type="stem_combination",
+                    branches=_ordered_unique(*pair),
+                    element=str(combo.get("transformation_candidate") or "") or None,
+                    rule_id="STEM-FIVE-COMBINATION-001",
+                )
+            )
+
+    # Common 子平 visible-stem clash pairs. 戊己不列入天干冲。
+    for pair in _STEM_CLASHES:
+        if _pair_in(seen_stems, pair):
+            hits.append(
+                BranchRelation(
+                    type="stem_clash",
+                    branches=pair,
+                    element=None,
+                    rule_id="STEM-CLASH-001",
+                )
+            )
+
+    # 六合.
     for combo in rels.get("branch_six_combinations", []):
-        pair = combo["pair"]
-        if _pair_in(seen_branches, pair):
+        if not isinstance(combo, dict):
+            continue
+        pair = [str(value) for value in combo.get("pair", [])]
+        if len(pair) == 2 and _pair_in(seen_branches, pair):
             hits.append(
                 BranchRelation(
                     type="six_combination",
-                    branches=_branch_set(*pair),
-                    element=combo.get("transformation_candidate"),
+                    branches=_ordered_unique(*pair),
+                    element=str(combo.get("transformation_candidate") or "") or None,
                     rule_id="BRANCH-SIX-COMBINATION-001",
                 )
             )
 
-    # Three combinations (三合) — element candidate
+    # 三合 and the two 旺支-linked 半合 pairs. Do not duplicate 半合 when三合全。
     for combo in rels.get("three_combinations", []):
-        tri = combo["branches"]
-        if all(b in seen_branches for b in tri):
+        if not isinstance(combo, dict):
+            continue
+        tri = [str(value) for value in combo.get("branches", [])]
+        if len(tri) != 3:
+            continue
+        full = _full_group_present(seen_branches, cast(list[object], tri))
+        element = str(combo.get("element") or "") or None
+        if full:
             hits.append(
                 BranchRelation(
                     type="three_combination",
-                    branches=_branch_set(*tri),
-                    element=combo.get("element"),
+                    branches=_ordered_unique(*tri),
+                    element=element,
                     rule_id="BRANCH-THREE-COMBINATION-001",
                 )
             )
+        else:
+            for pair in ((tri[0], tri[1]), (tri[1], tri[2])):
+                if _pair_in(seen_branches, pair):
+                    hits.append(
+                        BranchRelation(
+                            type="half_combination",
+                            branches=pair,
+                            element=element,
+                            rule_id="BRANCH-HALF-COMBINATION-001",
+                        )
+                    )
 
-    # Three meetings (三会) — element candidate
+    # 三会 and adjacent 半会 pairs. Do not duplicate 半会 when三会全。
     for combo in rels.get("three_meetings", []):
-        tri = combo["branches"]
-        if all(b in seen_branches for b in tri):
+        if not isinstance(combo, dict):
+            continue
+        tri = [str(value) for value in combo.get("branches", [])]
+        if len(tri) != 3:
+            continue
+        full = _full_group_present(seen_branches, cast(list[object], tri))
+        element = str(combo.get("element") or "") or None
+        if full:
             hits.append(
                 BranchRelation(
                     type="three_meeting",
-                    branches=_branch_set(*tri),
-                    element=combo.get("element"),
+                    branches=_ordered_unique(*tri),
+                    element=element,
                     rule_id="BRANCH-THREE-MEETING-001",
                 )
             )
+        else:
+            for pair in ((tri[0], tri[1]), (tri[1], tri[2])):
+                if _pair_in(seen_branches, pair):
+                    hits.append(
+                        BranchRelation(
+                            type="half_meeting",
+                            branches=pair,
+                            element=element,
+                            rule_id="BRANCH-HALF-MEETING-001",
+                        )
+                    )
 
-    # Clashes (六冲)
-    for pair in rels.get("branch_clashes", []):
-        if _pair_in(seen_branches, pair):
+    for pair_raw in rels.get("branch_clashes", []):
+        pair = tuple(str(value) for value in cast(list[object], pair_raw))
+        if len(pair) == 2 and _pair_in(seen_branches, pair):
+            hits.append(BranchRelation("clash", pair, None, "BRANCH-CLASH-001"))
+
+    for pair_raw in rels.get("branch_harms", []):
+        pair = tuple(str(value) for value in cast(list[object], pair_raw))
+        if len(pair) == 2 and _pair_in(seen_branches, pair):
+            hits.append(BranchRelation("harm", pair, None, "BRANCH-HARM-001"))
+
+    breaks = rels.get("branch_breaks", {})
+    if isinstance(breaks, dict):
+        for pair_raw in breaks.get("pairs", []):
+            pair = tuple(str(value) for value in cast(list[object], pair_raw))
+            if len(pair) == 2 and _pair_in(seen_branches, pair):
+                hits.append(BranchRelation("break", pair, None, "BRANCH-BREAK-001"))
+
+    for punishment in rels.get("punishments", []):
+        if not isinstance(punishment, dict):
+            continue
+        kind = str(punishment.get("type", ""))
+        values = tuple(str(value) for value in punishment.get("branches", []))
+        if kind == "three_punishment" and len(values) == 3 and _pair_in(seen_branches, values):
+            hits.append(
+                BranchRelation("punishment", values, None, "BRANCH-PUNISHMENT-3-001")
+            )
+        elif kind == "mutual_punishment" and len(values) == 2 and _pair_in(
+            seen_branches, values
+        ):
+            hits.append(
+                BranchRelation("punishment", values, None, "BRANCH-PUNISHMENT-M-001")
+            )
+        elif kind == "self_punishment" and len(values) == 1 and branches.count(values[0]) >= 2:
             hits.append(
                 BranchRelation(
-                    type="clash",
-                    branches=_branch_set(*pair),
-                    element=None,
-                    rule_id="BRANCH-CLASH-001",
+                    "punishment",
+                    (values[0], values[0]),
+                    None,
+                    "BRANCH-PUNISHMENT-S-001",
                 )
             )
 
-    # Harms (六害)
-    for pair in rels.get("branch_harms", []):
-        if _pair_in(seen_branches, pair):
-            hits.append(
-                BranchRelation(
-                    type="harm",
-                    branches=_branch_set(*pair),
-                    element=None,
-                    rule_id="BRANCH-HARM-001",
-                )
-            )
-
-    # Branch breaks (相穿) — optional, controlled by profile.enable_branch_break
-    for pair in rels.get("branch_breaks", {}).get("pairs", []):
-        if _pair_in(seen_branches, pair):
-            hits.append(
-                BranchRelation(
-                    type="break",
-                    branches=_branch_set(*pair),
-                    element=None,
-                    rule_id="BRANCH-BREAK-001",
-                )
-            )
-
-    # Punishments (相刑) — three_punishment, mutual_punishment, self_punishment
-    for p in rels.get("punishments", []):
-        if p["type"] == "three_punishment":
-            tri = p["branches"]
-            if all(b in seen_branches for b in tri):
-                hits.append(
-                    BranchRelation(
-                        type="punishment",
-                        branches=_branch_set(*tri),
-                        element=None,
-                        rule_id="BRANCH-PUNISHMENT-3-001",
-                    )
-                )
-        elif p["type"] == "mutual_punishment":
-            pair = p["branches"]
-            if _pair_in(seen_branches, pair):
-                hits.append(
-                    BranchRelation(
-                        type="punishment",
-                        branches=_branch_set(*pair),
-                        element=None,
-                        rule_id="BRANCH-PUNISHMENT-M-001",
-                    )
-                )
-        elif p["type"] == "self_punishment":
-            branch = p["branches"][0]
-            count = branches.count(branch)
-            if count >= 2:
-                hits.append(
-                    BranchRelation(
-                        type="punishment",
-                        branches=(branch, branch),
-                        element=None,
-                        rule_id="BRANCH-PUNISHMENT-S-001",
-                    )
-                )
-
-    return hits
+    # Stable de-duplication protects against overlapping configurable tables.
+    deduplicated: list[BranchRelation] = []
+    seen: set[tuple[str, tuple[str, ...], str | None]] = set()
+    for hit in hits:
+        key = (hit.type, hit.branches, hit.element)
+        if key not in seen:
+            seen.add(key)
+            deduplicated.append(hit)
+    return deduplicated
