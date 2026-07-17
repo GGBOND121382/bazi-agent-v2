@@ -1,11 +1,11 @@
 <#
-status.ps1 — 查看后台启动任务、后端和前端状态。
+status.ps1 - Show background startup, backend, and frontend status.
 
-用法:
+Usage:
     .\status.ps1
     .\status.ps1 -BackendPort 9000 -FrontendPort 5174
 
-兼容 Windows PowerShell 5.1。
+Compatible with Windows PowerShell 5.1.
 #>
 
 [CmdletBinding()]
@@ -78,8 +78,8 @@ function Show-StartupState {
     $process = Get-TrackedProcess -PidFile $StartupPidFile
     if ($null -ne $process) {
         $uptime = (Get-Date) - $process.StartTime
-        Write-Host ("STARTING 启动任务 pid={0} 已运行 {1:hh\:mm\:ss}" -f $process.Id, $uptime) -ForegroundColor Cyan
-        Write-Host "         日志：Get-Content '$StartupOutLog' -Wait" -ForegroundColor DarkCyan
+        Write-Host ("STARTING startup pid={0} uptime={1:hh\:mm\:ss}" -f $process.Id, $uptime) -ForegroundColor Cyan
+        Write-Host "         log: Get-Content '$StartupOutLog' -Wait" -ForegroundColor DarkCyan
         return
     }
 
@@ -98,13 +98,13 @@ function Show-ServiceState {
     $process = Get-TrackedProcess -PidFile $PidFile
     if ($null -ne $process) {
         $uptime = (Get-Date) - $process.StartTime
-        Write-Host ("UP       {0,-10} pid={1,-7} port={2,-5} 已运行 {3:hh\:mm\:ss}" -f $Name, $process.Id, $Port, $uptime) -ForegroundColor Green
+        Write-Host ("UP       {0,-10} pid={1,-7} port={2,-5} uptime={3:hh\:mm\:ss}" -f $Name, $process.Id, $Port, $uptime) -ForegroundColor Green
         return
     }
 
     $owners = @(Get-PortOwners -Port $Port)
     if ($owners.Count -gt 0) {
-        Write-Host "ORPHAN   $Name 端口 $Port 被 PID $($owners -join ',') 占用，无有效 PID 跟踪" -ForegroundColor Yellow
+        Write-Host "ORPHAN   $Name port $Port owned by PID $($owners -join ','); no valid PID tracking" -ForegroundColor Yellow
         foreach ($processIdValue in $owners) {
             $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$processIdValue" -ErrorAction SilentlyContinue
             if ($null -ne $cim) {
@@ -114,7 +114,7 @@ function Show-ServiceState {
         return
     }
 
-    Write-Host "DOWN     $Name 未运行 (port $Port)" -ForegroundColor DarkGray
+    Write-Host "DOWN     $Name is not running (port $Port)" -ForegroundColor DarkGray
 }
 
 $ResolvedBackendPort = Resolve-ServicePort -ExplicitPort $BackendPort -PortFile $BackendPortFile -DefaultPort 8000
@@ -128,7 +128,7 @@ try {
     $response = Invoke-WebRequest -Uri "http://127.0.0.1:$ResolvedBackendPort/api/v1/health" -UseBasicParsing -TimeoutSec 2
     Write-Host "HEALTH   backend /api/v1/health -> $($response.StatusCode)" -ForegroundColor Green
 } catch {
-    Write-Host 'HEALTH   backend /api/v1/health 不可达' -ForegroundColor Red
+    Write-Host 'HEALTH   backend /api/v1/health is unreachable' -ForegroundColor Red
 }
 
 $startupProcess = Get-TrackedProcess -PidFile $StartupPidFile
