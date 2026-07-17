@@ -50,7 +50,10 @@ jobs:
           .\start.ps1 -Mock -SkipInstall -BackendPort $backendPort -FrontendPort $frontendPort
           Write-Host 'TERMINAL_PROBE_OK'
 
-          $deadline = (Get-Date).AddSeconds(40)
+          # Cold Windows runners occasionally need more than 40 seconds even
+          # though both processes start correctly. Keep this aligned with the
+          # full CI smoke test to avoid false negatives.
+          $deadline = (Get-Date).AddSeconds(90)
           $backendReady = $false
           $frontendReady = $false
           while ((Get-Date) -lt $deadline) {
