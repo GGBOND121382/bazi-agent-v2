@@ -13,17 +13,65 @@ from ..api.dto import (
     WarningDTO,
 )
 from ..domain.chart import ChartResult
-from ..domain.rules import evaluate_relations
+from ..domain.rules import evaluate_relations, evaluate_shensha
 
 _RELATION_LABELS = {
+    "stem_combination": "天干五合",
+    "stem_clash": "天干相冲",
     "six_combination": "六合",
     "three_combination": "三合",
+    "half_combination": "半合",
     "three_meeting": "三会",
+    "half_meeting": "半会",
     "clash": "六冲",
     "harm": "六害",
     "break": "相破",
     "punishment": "相刑",
 }
+_ELEMENT_LABELS = {
+    "wood": "木",
+    "fire": "火",
+    "earth": "土",
+    "metal": "金",
+    "water": "水",
+}
+
+
+def _enriched_details(result: ChartResult) -> dict[str, object]:
+    """Return API details with the authoritative v2 神煞 result attached.
+
+    Calendar adapters remain focused on calendar-library values. This mapper
+    overlays the versioned project rule engine so every public API consumer,
+    including the LLM pipeline, sees the same per-pillar names and provenance.
+    """
+    details = dict(result.details)
+    hits = evaluate_shensha(result.pillars)
+    raw_pillars = details.get("pillars")
+    enriched_pillars: list[dict[str, object]] = []
+    if isinstance(raw_pillars, list):
+        for raw in raw_pillars:
+            if not isinstance(raw, dict):
+                continue
+            item = dict(cast(dict[str, object], raw))
+            position = str(item.get("position", ""))
+            item["shensha"] = [hit.name for hit in hits if hit.target_position == position]
+            enriched_pillars.append(item)
+    details["pillars"] = enriched_pillars
+    details["shensha"] = [
+        {
+            "name": hit.name,
+            "target": hit.target,
+            "target_position": hit.target_position,
+            "anchor": hit.anchor,
+            "reference": hit.reference,
+            "rule_id": hit.rule_id,
+            "rule_version": hit.rule_version,
+            "source_title": hit.source_title,
+            "source_locator": hit.source_locator,
+        }
+        for hit in hits
+    ]
+    return details
 
 
 def to_chart_result_dto(result: ChartResult) -> ChartResultDTO:
@@ -54,7 +102,7 @@ def to_chart_result_dto(result: ChartResult) -> ChartResultDTO:
                 {"engine": e.engine, "version": e.version, "took_ms": e.took_ms}
                 for e in result.engine_versions
             ],
-            "deterministic_details": result.details,
+            "deterministic_details": _enriched_details(result),
         },
         pillars=pillars,
         day_master=result.day_master,
@@ -80,8 +128,8 @@ def to_chart_result_dto(result: ChartResult) -> ChartResultDTO:
     )
 
 
-def _detail_pillars(result: ChartResult) -> dict[str, dict[str, Any]]:
-    raw = result.details.get("pillars")
+def _detail_pillars(details: dict[str, object]) -> dict[str, dict[str, Any]]:
+    raw = details.get("pillars")
     if not isinstance(raw, list):
         return {}
     return {
@@ -95,7 +143,8 @@ def to_chart_overview_view_dto(result: ChartResult) -> ChartOverviewViewDTO:
     fact_ids_by_value: dict[str, list[str]] = {}
     for fact in result.facts:
         fact_ids_by_value.setdefault(str(fact.value), []).append(fact.fact_id)
-    detail_by_position = _detail_pillars(result)
+    details = _enriched_details(result)
+    detail_by_position = _detail_pillars(details)
     pillars = []
     for p in result.pillar_dicts():
         detail = detail_by_position.get(str(p["position"]), {})
@@ -105,7 +154,10 @@ def to_chart_overview_view_dto(result: ChartResult) -> ChartOverviewViewDTO:
                 stem=p["stem"],
                 branch=p["branch"],
                 ten_god=str(detail.get("major_star") or p.get("ten_god_of_stem") or "") or None,
-                hidden_stems=cast(list[dict[str, Any]], detail.get("hidden_stems") or p.get("hidden_stems") or []),
+                hidden_stems=cast(
+                    list[dict[str, Any]],
+                    detail.get("hidden_stems") or p.get("hidden_stems") or [],
+                ),
                 nayin=str(detail.get("nayin") or p.get("nayin") or "") or None,
                 growth_stage=str(detail.get("growth_stage") or "") or None,
                 fact_ids=fact_ids_by_value.get(p["ganzhi"], []),
@@ -116,11 +168,12 @@ def to_chart_overview_view_dto(result: ChartResult) -> ChartOverviewViewDTO:
             "type": relation.type,
             "label": _RELATION_LABELS.get(relation.type, relation.type),
             "participants": list(relation.branches),
+            "element": _ELEMENT_LABELS.get(relation.element or "", relation.element),
             "rule_id": relation.rule_id,
         }
         for relation in evaluate_relations(result.pillars)
     ]
-    five_elements_raw = result.details.get("five_elements")
+    five_elements_raw = details.get("five_elements")
     five_elements = (
         cast(list[dict[str, Any]], five_elements_raw)
         if isinstance(five_elements_raw, list)
