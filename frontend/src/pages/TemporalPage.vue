@@ -223,7 +223,7 @@ const natalRelationText = computed(() => overview.value?.relationships.map((rela
 
       <section id="professional-table" class="card-surface professional-table-card" aria-label="流年大运与四柱专业排盘">
         <header><div><p class="eyebrow">同表对照</p><h2>{{ year }} 流年、大运与原局四柱</h2></div><small>横向滚动可查看全部六柱</small></header>
-        <div class="professional-scroll">
+        <div class="professional-scroll" tabindex="0" aria-label="流年大运与原局四柱横向表格">
           <div class="professional-grid professional-header-row">
             <span>日期</span><strong v-for="column in professionalColumns" :key="column.key">{{ column.label }}</strong>
           </div>
