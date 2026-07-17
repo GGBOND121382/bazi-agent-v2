@@ -1,0 +1,20 @@
+name: Source snapshot debug
+
+on:
+  push:
+    branches: [agent/mobile-ui-deterministic-chat]
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: full-source-snapshot
+          path: |
+            .
+            !.git
+          if-no-files-found: error
+          retention-days: 1
