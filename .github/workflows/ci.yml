@@ -7,6 +7,19 @@ on:
     branches: [main, agent/mobile-ui-deterministic-chat]
 
 jobs:
+  source_snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-snapshot
+          path: |
+            .
+            !.git/**
+          include-hidden-files: true
+          retention-days: 1
+
   powershell_scripts:
     runs-on: windows-latest
     timeout-minutes: 20
