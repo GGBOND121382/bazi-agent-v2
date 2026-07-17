@@ -1,15 +1,18 @@
 """Analysis job orchestration, cancellation, SSE persistence, and report mapping."""
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable
 
 from ..adapters.llm import DeepSeekProvider
-from ..services.agent import AnalysisPipeline
+from ..services.agent import AnalysisPipeline, AnalysisPipelineError
 from ..services.chart_service import ChartService, get_default_service
 from ..services.rag import DatasetV2Retriever
 from .sqlite_store import SQLiteAnalysisStore
 from .state import TERMINAL_STAGES, AnalysisJob, InMemoryAnalysisStore, JobStateError
+
+logger = logging.getLogger(__name__)
 
 
 class JobCancelled(RuntimeError):
@@ -110,7 +113,20 @@ class AnalysisJobService:
                 self.store.transition(
                     job_id, stage="cancelled", progress=current.progress, retryable=False
                 )
+        except AnalysisPipelineError as exc:
+            logger.warning("analysis_pipeline_failed job_id=%s", job_id, exc_info=True)
+            current = self.require(job_id)
+            if current.stage not in TERMINAL_STAGES:
+                self.store.transition(
+                    job_id,
+                    stage="failed",
+                    progress=current.progress,
+                    retryable=False,
+                    error_code="ANALYSIS_VALIDATION_FAILED",
+                    safe_details=exc.safe_details,
+                )
         except Exception:
+            logger.exception("analysis_job_failed job_id=%s", job_id)
             current = self.require(job_id)
             if current.stage not in TERMINAL_STAGES:
                 self.store.transition(

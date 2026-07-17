@@ -16,10 +16,24 @@ let failures = 0
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 const storageKey = `bazi:last-event:${props.jobId}`
 const terminal = new Set<JobEventDTO['stage']>(['completed', 'failed', 'cancelled'])
+const stageLabels: Record<JobEventDTO['stage'], string> = {
+  queued: '排队中',
+  calculating: '排盘计算',
+  needs_user_resolution: '等待确认',
+  retrieving: '检索资料',
+  interpreting: '模型解读',
+  verifying: '结果校验',
+  revision_pending: '自动修订',
+  report_building: '生成报告',
+  completed: '分析完成',
+  failed: '分析失败',
+  cancelled: '已取消',
+}
 
 const current = computed(() => events.value.at(-1))
 const progress = computed(() => current.value?.progress ?? snapshot.value?.progress ?? 0)
 const stage = computed(() => current.value?.stage ?? snapshot.value?.stage ?? 'queued')
+const stageLabel = computed(() => stageLabels[stage.value])
 
 function connect() {
   source?.close()
@@ -39,7 +53,6 @@ function connect() {
   })
   source.onerror = () => {
     failures += 1
-    if (failures < 3) return
     source?.close()
     void pollAndReconnect()
   }
@@ -83,10 +96,10 @@ onBeforeUnmount(() => { source?.close(); if (reconnectTimer) clearTimeout(reconn
     <div class="progress-track" role="progressbar" aria-label="结构化分析完成进度" :aria-valuenow="progress" aria-valuemin="0" aria-valuemax="100">
       <span :style="{ width: `${progress}%` }"></span>
     </div>
-    <p><strong>{{ stage }}</strong> · {{ progress }}%</p>
+    <p><strong>{{ stageLabel }}</strong> · {{ progress }}%</p>
     <ol class="job-events">
       <li v-for="event in events" :key="event.event_id">
-        <span>{{ event.progress }}%</span><strong>{{ event.message_key }}</strong>
+        <span>{{ event.progress }}%</span><strong>{{ stageLabels[event.stage] }}</strong>
         <code v-if="event.error_code">{{ event.error_code }}</code>
       </li>
     </ol>

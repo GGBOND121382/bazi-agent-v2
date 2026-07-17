@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import httpx
 import jsonschema
 import pytest
 
@@ -132,6 +133,42 @@ def test_deepseek_fails_closed_without_environment_key(monkeypatch: pytest.Monke
 
 
 @pytest.mark.rag
+def test_deepseek_allows_slow_structured_responses(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    provider = DeepSeekProvider()
+
+    assert provider._timeout.connect == 15.0
+    assert provider._timeout.read == 180.0
+
+
+@pytest.mark.rag
+def test_deepseek_retries_a_dropped_response_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise httpx.ReadError("incomplete chunked read", request=request)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '{"status":"ok"}'}}]},
+        )
+
+    provider = DeepSeekProvider(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    response = provider.complete_json(
+        system_prompt="test",
+        input_payload={},
+        schema={"type": "object"},
+        prompt_version="test-v1",
+    )
+
+    assert calls == 2
+    assert response.payload == {"status": "ok"}
+
+
+@pytest.mark.rag
 def test_verifier_rejects_hallucinated_ids_and_high_risk_assertions() -> None:
     evidence = _evidence().retrieve(
         __import__("app.services.rag", fromlist=["RetrievalPlan"]).RetrievalPlan(
@@ -226,6 +263,29 @@ def test_pipeline_builds_schema_valid_report_from_passed_analysis_only() -> None
         (ROOT / "contracts" / "schemas" / "report.schema.json").read_text(encoding="utf-8")
     )
     jsonschema.validate(result.report, schema)
+
+
+@pytest.mark.rag
+def test_pipeline_discards_one_malformed_claim_instead_of_failing_the_job() -> None:
+    payload = _analysis().model_dump(mode="json")
+    payload["claims"].append(
+        {
+            **payload["claims"][0],
+            "claim_id": "CLAIM-UNTRACEABLE",
+            "fact_ids": [],
+        }
+    )
+
+    result = AnalysisPipeline(
+        provider=_MockProvider(payload), retriever=_evidence()
+    ).run(chart=_chart(), user_focus=("引用必须可追溯",), max_revisions=0)
+
+    assert result.validation.status == "passed"
+    assert result.report is not None
+    assert [claim.claim_id for claim in result.analysis.claims] == ["CLAIM-1"]
+    assert result.generation_trace["attempts"][0]["schema_repairs"][0]["code"] == (
+        "INVALID_CLAIM_SCHEMA"
+    )
 
 
 @pytest.mark.rag

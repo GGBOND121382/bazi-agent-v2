@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from ...adapters.llm.deepseek import ProviderResponse, StructuredOutputProvider
-from ...api.dto import ChartResultDTO, StructuredAnalysisDTO, ValidationResultDTO
+from ...api.dto import ChartResultDTO, ClaimDTO, StructuredAnalysisDTO, ValidationResultDTO
 from ...domain.pillars import Branch, FourPillars, Pillar, Stem
 from ...domain.rules.relations import evaluate_relations
 from ..rag.models import EvidenceRetriever, RetrievalChannel, RetrievalPlan, RetrievedEvidence
@@ -26,7 +26,9 @@ from .verifier import verify_analysis
 
 
 class AnalysisPipelineError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, safe_details: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.safe_details = safe_details or {}
 
 
 _RELATION_LABELS = {
@@ -109,6 +111,60 @@ def _serialize(item: RetrievedEvidence) -> dict[str, Any]:
             "can_supply_explanation": item.can_supply_explanation,
         },
     }
+
+
+def _discard_malformed_claims(payload: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Drop individual untraceable claims without discarding an otherwise valid analysis."""
+    claims = payload.get("claims")
+    if not isinstance(claims, list):
+        return payload, []
+
+    valid_claims: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    for index, raw_claim in enumerate(claims):
+        try:
+            claim = ClaimDTO.model_validate(raw_claim)
+        except ValueError as exc:
+            claim_id = raw_claim.get("claim_id") if isinstance(raw_claim, dict) else None
+            rejected.append(
+                {
+                    "code": "INVALID_CLAIM_SCHEMA",
+                    "claim_id": str(claim_id) if claim_id else None,
+                    "claim_index": index,
+                    "detail": str(exc).splitlines()[0],
+                }
+            )
+        else:
+            valid_claims.append(claim.model_dump(mode="json"))
+
+    # An analysis with no valid claims should go through the normal schema-failure
+    # path instead of being silently accepted as an empty report.
+    if not rejected or (claims and not valid_claims):
+        return payload, rejected
+
+    limitations = payload.get("limitations")
+    cleaned_limitations = list(limitations) if isinstance(limitations, list) else []
+    cleaned_limitations.append(
+        f"{len(rejected)} model claim(s) were omitted because they were not traceable."
+    )
+    return {**payload, "claims": valid_claims, "limitations": cleaned_limitations}, rejected
+
+
+def _validate_provider_payload(
+    payload: dict[str, Any],
+) -> tuple[StructuredAnalysisDTO, list[dict[str, Any]]]:
+    normalized_payload, schema_repairs = _discard_malformed_claims(payload)
+    try:
+        return StructuredAnalysisDTO.model_validate(normalized_payload), schema_repairs
+    except ValueError as exc:
+        raise AnalysisPipelineError(
+            "provider output violates analysis schema",
+            safe_details={
+                "required_revisions": ["OUTPUT_SCHEMA_INVALID"],
+                "validation_errors": schema_repairs
+                or [{"code": "OUTPUT_SCHEMA_INVALID", "detail": str(exc).splitlines()[0]}],
+            },
+        ) from exc
 
 
 def _walk_dicts(value: object) -> Iterator[dict[str, Any]]:
@@ -368,12 +424,7 @@ class AnalysisPipeline:
                 schema=schema,
                 prompt_version=INTERPRETER_PROMPT_VERSION,
             )
-            try:
-                analysis = StructuredAnalysisDTO.model_validate(response.payload)
-            except ValueError as exc:
-                raise AnalysisPipelineError(
-                    "provider output violates analysis schema"
-                ) from exc
+            analysis, schema_repairs = _validate_provider_payload(response.payload)
             if on_stage:
                 on_stage("verifying")
             validation = verify_analysis(
@@ -391,6 +442,7 @@ class AnalysisPipeline:
                     "attempt": attempt + 1,
                     "input_payload": payload,
                     "model_output": response.payload,
+                    "schema_repairs": schema_repairs,
                     "validation": validation.model_dump(mode="json"),
                     "reflection": analysis.reflection.model_dump(mode="json")
                     if analysis.reflection is not None

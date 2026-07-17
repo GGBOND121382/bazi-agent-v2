@@ -39,7 +39,8 @@ class DeepSeekProvider:
         *,
         model_id: str = "deepseek-chat",
         base_url: str = "https://api.deepseek.com",
-        timeout_seconds: float = 45.0,
+        timeout_seconds: float = 180.0,
+        max_transport_attempts: int = 2,
         client: httpx.Client | None = None,
     ) -> None:
         api_key = os.environ.get("DEEPSEEK_API_KEY")
@@ -48,7 +49,11 @@ class DeepSeekProvider:
         self._api_key = api_key
         self._model_id = model_id
         self._base_url = base_url.rstrip("/")
-        self._timeout = timeout_seconds
+        # DeepSeek can acknowledge a large structured-output request quickly,
+        # then spend well over 45 seconds generating the response body. Keep
+        # connection failures fast while allowing enough time to read it.
+        self._timeout = httpx.Timeout(timeout_seconds, connect=15.0)
+        self._max_transport_attempts = max(1, max_transport_attempts)
         self._client = client or httpx.Client()
 
     def complete_json(
@@ -75,12 +80,20 @@ class DeepSeekProvider:
             "response_format": {"type": "json_object"},
             "temperature": 0,
         }
-        response = self._client.post(
-            f"{self._base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {self._api_key}"},
-            json=request_body,
-            timeout=self._timeout,
-        )
+        response: httpx.Response | None = None
+        for attempt in range(self._max_transport_attempts):
+            try:
+                response = self._client.post(
+                    f"{self._base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {self._api_key}"},
+                    json=request_body,
+                    timeout=self._timeout,
+                )
+                break
+            except httpx.TransportError:
+                if attempt + 1 >= self._max_transport_attempts:
+                    raise
+        assert response is not None
         response.raise_for_status()
         try:
             content = response.json()["choices"][0]["message"]["content"]
