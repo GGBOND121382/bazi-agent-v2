@@ -56,7 +56,9 @@ def balanced_queries(
         )
     )
     shensha_queries = tuple(f"{name} 柱位 喜忌 查法" for name in names[:6])
-    return tuple(dict.fromkeys(core + relation_queries + shensha_queries + user_focus))
+    # User intent is first so strict citation validation cannot be starved by
+    # broad structural or auxiliary-marker queries.
+    return tuple(dict.fromkeys(user_focus + core + relation_queries + shensha_queries))
 
 
 def reflection_requires_revision(analysis: StructuredAnalysisDTO) -> bool:
