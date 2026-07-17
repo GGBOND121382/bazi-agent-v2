@@ -13,6 +13,9 @@ from .qiyun_dayun import (
 )
 from .relations import (
     BranchRelation,
+    PositionedPillar,
+    PositionedRelation,
+    evaluate_positioned_relations,
     evaluate_relations,
 )
 from .shensha import (
@@ -26,6 +29,8 @@ __all__ = [
     "BranchRelation",
     "DayunPeriod",
     "LiuyunContext",
+    "PositionedPillar",
+    "PositionedRelation",
     "QiyunResult",
     "ShenShaHit",
     "build_temporal_context",
@@ -33,6 +38,7 @@ __all__ = [
     "compute_liuyun",
     "compute_qiyun_and_dayun",
     "describe_temporal_pillar",
+    "evaluate_positioned_relations",
     "evaluate_relations",
     "evaluate_shensha",
     "evaluate_shensha_for_target",

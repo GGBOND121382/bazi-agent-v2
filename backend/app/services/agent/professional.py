@@ -17,16 +17,22 @@ PROFESSIONAL_RUBRIC: dict[str, Any] = {
         "nayin_as_secondary_check",
         "shensha_weighted_by_structure_and_position",
         "dayun_liunian_liuyue_liuri_hierarchy",
+        "kinship_stars_palaces_and_temporal_triggers",
+        "health_elements_climate_organs_and_temporal_triggers",
+        "lifecycle_dayun_from_birth_to_each_period",
         "user_focus_with_timing_and_conditions",
     ],
     "minimum_expectations": {
-        "reasoning_summary_steps": 8,
+        "reasoning_summary_steps": 11,
         "include_counterevidence": True,
         "distinguish_fact_and_interpretation": True,
         "never_recalculate_chart": True,
         "never_treat_seen_combination_as_transformed": True,
         "never_select_useful_god_by_missing_element_only": True,
         "never_let_shensha_override_structure": True,
+        "require_kinship_assessment": True,
+        "require_health_assessment": True,
+        "require_all_dayun_periods": True,
     },
 }
 
@@ -45,6 +51,10 @@ def balanced_queries(
         f"{month.ganzhi}月令 格局成败破格救应 从格排除条件",
         "天干地支合会冲刑害破 成局化气争合妒合条件",
         "大运流年流月流日 十神喜用 应期层级",
+        "岁运并临 伏吟 反吟 天克地冲 多层合冲刑害会 条件与救应",
+        "六亲十神 父母兄弟配偶子女 宫位 透藏根气 岁运触发",
+        "健康五行 寒暖燥湿 调候 脏腑象义 大运变化",
+        "出生至起运 全部大运 生命周期 事业财运婚恋六亲健康",
         "纳音五行在子平命理中的辅助用法",
     )
     relation_queries = tuple(str(item["support_query"]) for item in relations[:8])

@@ -8,10 +8,15 @@ import ReportReadPage from '@/pages/ReportReadPage.vue'
 import AnalysisProgressPage from '@/pages/AnalysisProgressPage.vue'
 import HistoryPage from '@/pages/HistoryPage.vue'
 import SettingsPage from '@/pages/SettingsPage.vue'
+import LoginPage from '@/pages/LoginPage.vue'
+import AdminPage from '@/pages/AdminPage.vue'
+import { useBaziClient } from '@/api'
 
-export default createRouter({
+const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/login', name: 'login', component: LoginPage, meta: { title: '登录', public: true } },
+    { path: '/admin', name: 'admin', component: AdminPage, meta: { title: '系统后台', admin: true } },
     { path: '/', name: 'home', component: LandingPage, meta: { title: '首页排盘' } },
     { path: '/charts/new', name: 'chart-new', component: ChartNewWizard, meta: { title: '新建命盘' } },
     { path: '/charts/:chartId', name: 'chart-overview', component: ChartOverviewPage, props: true, meta: { title: '基本排盘' } },
@@ -28,3 +33,20 @@ export default createRouter({
     return { top: 0 }
   },
 })
+
+
+router.beforeEach(async (to) => {
+  if (to.meta.public) return true
+  const cached = sessionStorage.getItem('bazi:current-user')
+  try {
+    const user = cached ? JSON.parse(cached) : await useBaziClient().getCurrentUser()
+    sessionStorage.setItem('bazi:current-user', JSON.stringify(user))
+    if (to.meta.admin && user.role !== 'admin') return '/'
+    return true
+  } catch {
+    sessionStorage.removeItem('bazi:current-user')
+    return { name: 'login', query: { redirect: to.fullPath } }
+  }
+})
+
+export default router

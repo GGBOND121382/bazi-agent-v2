@@ -62,9 +62,11 @@ async function mockApi(page: Page) {
     qiyun: { direction: 'forward', start_years: 2, start_months: 9, start_days: 17, start_hours: 0, start_datetime: '2002-04-15T12:00:00+08:00' },
     dayuns: [{ ...temporalDetail('辛卯'), index: 3, start_year: 2022, end_year: 2031, start_age: 24, end_age: 33, fact_id: 'D3', rule_id: 'DY' }],
     active_dayun: { ...temporalDetail('辛卯'), index: 3, start_year: 2022, end_year: 2031, start_age: 24, end_age: 33, fact_id: 'D3', rule_id: 'DY' },
-    year: { ...temporalDetail('丙午'), year: 2026, age: 28, xiaoyun: '甲戌', fact_id: 'Y2026', rule_id: 'LY' },
+    year: { ...temporalDetail('丙午'), year: 2026, civil_target_year: 2026, lichun_year: 2026, age: 28, xiaoyun: '甲戌', fact_id: 'Y2026', rule_id: 'LY', temporal_interactions: [], interaction_summary: {} },
     months: Array.from({ length: 12 }, (_, index) => ({ ...temporalDetail('庚寅'), index: index + 1, label: `${index + 1}月`, jie_name: '立春', start_datetime: `2026-${String(index + 1).padStart(2, '0')}-01T00:00:00+08:00`, end_datetime: `2026-${String(Math.min(index + 2, 12)).padStart(2, '0')}-01T00:00:00+08:00`, fact_id: `M${index + 1}`, rule_id: 'LM' })),
-    selected_day: { ...temporalDetail('壬子'), date: '2026-07-17', lunar_date: '二〇二六年六月初四', month_ganzhi: '乙未', fact_id: 'DAY', rule_id: 'LD' },
+    selected_month: null,
+    selected_day: { ...temporalDetail('壬子'), date: '2026-07-17', lunar_date: '二〇二六年六月初四', month_ganzhi: '乙未', fact_id: 'DAY', rule_id: 'LD', temporal_interactions: [], interaction_summary: {} },
+    interactions: [], interaction_summary: { high_attention_count: 0, attention_count: 0, note: '结构触发不等于吉凶结论。' },
     seasonal_strength: { 木: '休', 火: '旺', 土: '相', 金: '死', 水: '囚' },
   } }))
   await page.route('**/api/v1/charts/chart_demo/chat', async (route) => route.fulfill({ json: {

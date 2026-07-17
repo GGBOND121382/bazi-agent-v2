@@ -1,0 +1,141 @@
+{
+  "schema_version": "wenzhen-compatibility-golden-v1",
+  "rule_profile": "wenzhen_compatible_v1",
+  "cases": [
+    {
+      "id": "case-01-1995",
+      "birth": "1995-12-22T16:00:00+08:00",
+      "gender": "male",
+      "pillars": ["乙亥", "戊子", "丁亥", "戊申"],
+      "required_relations": [
+        ["covering", ["戊子"]],
+        ["cut_foot", ["丁亥"]],
+        ["punishment", ["亥", "亥"]]
+      ]
+    },
+    {
+      "id": "case-02-1999",
+      "birth": "1999-06-29T12:00:00+08:00",
+      "gender": "female",
+      "pillars": ["己卯", "庚午", "壬子", "丙午"],
+      "required_shensha": [["勾绞煞", "month"], ["勾绞煞", "hour"]],
+      "required_relations": [
+        ["cut_foot", ["己卯"]],
+        ["cut_foot", ["庚午"]],
+        ["fanyin", ["壬子", "丙午"]]
+      ]
+    },
+    {
+      "id": "case-03-chongzhen",
+      "gender": "male",
+      "pillars": ["辛亥", "庚寅", "乙未", "己卯"],
+      "required_shensha": [["勾绞煞", "month"], ["童子煞", "hour"]],
+      "required_relations": [
+        ["hidden_combination", ["寅", "未"]],
+        ["covering", ["庚寅"]],
+        ["covering", ["乙未"]],
+        ["cut_foot", ["己卯"]]
+      ]
+    },
+    {
+      "id": "case-04-kublai",
+      "gender": "male",
+      "pillars": ["乙亥", "乙酉", "乙酉", "乙酉"],
+      "required_shensha": [["童子煞", "day"], ["童子煞", "hour"]],
+      "forbidden_shensha": [["九丑日", "day"]],
+      "required_relations": [
+        ["fuyin", ["乙酉", "乙酉"]],
+        ["cut_foot", ["乙酉"]]
+      ]
+    },
+    {
+      "id": "case-05-wuzetian",
+      "gender": "female",
+      "pillars": ["甲申", "丙寅", "甲午", "甲戌"],
+      "required_shensha": [["童子煞", "hour"]],
+      "required_relations": [
+        ["arching_meeting", ["申", "戌"]],
+        ["punishment_trigger", ["寅", "申"]],
+        ["covering", ["甲戌"]],
+        ["cut_foot", ["甲申"]]
+      ]
+    },
+    {
+      "id": "case-06-zhuyuanzhang",
+      "gender": "male",
+      "pillars": ["戊辰", "壬戌", "丁丑", "丁未"],
+      "required_relations": [
+        ["four_tombs_earth_structure", ["辰", "戌", "丑", "未"]],
+        ["punishment", ["丑", "未", "戌"]]
+      ]
+    },
+    {
+      "id": "case-07-1974",
+      "birth": "1974-04-03T14:00:00+08:00",
+      "gender": "male",
+      "pillars": ["甲寅", "丁卯", "甲戌", "辛未"],
+      "required_shensha": [["童子煞", "day"]],
+      "required_relations": [
+        ["hidden_combination", ["寅", "未"]],
+        ["hidden_combination", ["寅", "戌"]],
+        ["arching_combination", ["寅", "戌"]],
+        ["punishment_trigger", ["未", "戌"]],
+        ["covering", ["甲戌"]]
+      ]
+    },
+    {
+      "id": "case-08-1986",
+      "birth": "1986-11-21T10:00:00+08:00",
+      "gender": "male",
+      "pillars": ["丙寅", "己亥", "己巳", "己巳"],
+      "required_shensha": [["金神", "day"], ["金神", "hour"]],
+      "required_relations": [
+        ["fuyin", ["己巳", "己巳"]],
+        ["punishment_trigger", ["寅", "巳"]],
+        ["covering", ["己亥"]]
+      ]
+    },
+    {
+      "id": "case-09-1948-01",
+      "birth": "1948-01-20T01:00:00+08:00",
+      "gender": "male",
+      "pillars": ["丁亥", "癸丑", "甲辰", "乙丑"],
+      "required_shensha": [["童子煞", "day"], ["金神", "hour"]],
+      "required_relations": [["arching_meeting", ["亥", "丑"]]]
+    },
+    {
+      "id": "case-10-1948-00",
+      "birth": "1948-01-20T00:00:00+08:00",
+      "gender": "male",
+      "pillars": ["丁亥", "癸丑", "甲辰", "甲子"],
+      "required_shensha": [["童子煞", "day"]],
+      "required_relations": [["hidden_combination", ["子", "辰"]]]
+    },
+    {
+      "id": "case-11-1990",
+      "birth": "1990-01-01T00:00:00+08:00",
+      "gender": "male",
+      "pillars": ["己巳", "丙子", "丙寅", "戊子"],
+      "forbidden_shensha": [["勾绞煞", "day"]],
+      "required_relations": [
+        ["hidden_combination", ["子", "巳"]],
+        ["punishment_trigger", ["寅", "巳"]],
+        ["covering", ["戊子"]],
+        ["cut_foot", ["丙子"]]
+      ]
+    },
+    {
+      "id": "case-12-2000",
+      "birth": "2000-09-02T11:45:00+08:00",
+      "gender": "female",
+      "pillars": ["庚辰", "甲申", "癸亥", "戊午"],
+      "required_shensha": [["童子煞", "hour"]],
+      "required_relations": [
+        ["hidden_combination", ["申", "辰"]],
+        ["arching_combination", ["申", "辰"]],
+        ["hidden_combination", ["午", "亥"]],
+        ["cut_foot", ["甲申"]]
+      ]
+    }
+  ]
+}

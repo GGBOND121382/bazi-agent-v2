@@ -237,7 +237,7 @@ $env:BAZI_RAG_DATASET_DIR = 'D:\your-path\bazi_rag_dataset_v2_1'
 
 ### 重启后历史记录消失
 
-这是当前版本的已知边界。`ChartStore` 和分析任务存储仍是进程内实现，重启后端会清空本次运行的数据；多实例部署前需要替换为 PostgreSQL 和对象存储。
+当前本地玩具版使用仓库根目录 `runtime/bazi_agent.db` 持久化用户、命盘、任务、报告和对话，重启后不会清空；Prompt 与模型调用轨迹同时写入数据库和 `runtime/logs/llm_calls.jsonl`。若未来需要多实例部署，再替换为 PostgreSQL、独立任务队列和对象存储。
 
 ### 安全与用途边界
 

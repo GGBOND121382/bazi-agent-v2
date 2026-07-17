@@ -33,6 +33,21 @@ class ContractProvider:
                 "analysis_id": "analysis_contract",
                 "chart_id": kwargs["input_payload"]["chart_id"],
                 "school": "engineering_policy",
+                "kinship_assessment": [
+                    {"relation": name, "conclusion": "结合六亲星、宫位和岁运分析。"}
+                    for name in ["父亲", "母亲", "兄弟姐妹", "配偶婚恋", "子女", "家庭互动"]
+                ],
+                "health_assessment": [
+                    {"dimension": name, "conclusion": "结合原局偏性和岁运变化分析。"}
+                    for name in ["五行偏性", "寒暖燥湿", "传统脏腑", "保护因素", "大运变化", "生活建议"]
+                ],
+                "dayun_assessment": [
+                    {"stage": "出生至起运", "conclusion": "说明起运前阶段。"},
+                    *[
+                        {"stage": str(item.get("ganzhi", "大运")), "conclusion": "逐柱分析该步大运。"}
+                        for item in kwargs["input_payload"]["analysis_context"]["temporal"]["dayun_table"]
+                    ],
+                ],
                 "claims": [{
                     "claim_id": "claim_contract",
                     "topic": "引用",

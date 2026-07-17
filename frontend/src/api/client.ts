@@ -12,6 +12,9 @@ import type {
   ConfigurationDTO,
   FortuneChatRequestDTO,
   FortuneChatResponseDTO,
+  CurrentUserDTO,
+  ChatThreadSummaryDTO,
+  ChatThreadDTO,
 } from './schema'
 
 const REQUEST_ID_HEADER = 'X-Request-ID'
@@ -55,7 +58,7 @@ export class BaziClient {
       [REQUEST_ID_HEADER]: `req_${uuid()}`,
       ...extraHeaders,
     }
-    const init: RequestInit = { method, headers }
+    const init: RequestInit = { method, headers, credentials: 'same-origin' }
     if (body !== undefined) init.body = JSON.stringify(body)
 
     const response = await this.fetcher(url, init)
@@ -76,6 +79,39 @@ export class BaziClient {
     }
     if (response.status === 204) return undefined as unknown as T
     return (await response.json()) as T
+  }
+
+
+  login(username: string, password: string): Promise<CurrentUserDTO> {
+    return this.request<CurrentUserDTO>('POST', '/v1/auth/login', { username, password })
+  }
+
+  logout(): Promise<void> {
+    return this.request<void>('POST', '/v1/auth/logout')
+  }
+
+  getCurrentUser(): Promise<CurrentUserDTO> {
+    return this.request<CurrentUserDTO>('GET', '/v1/auth/me')
+  }
+
+  changePassword(password: string): Promise<void> {
+    return this.request<void>('POST', '/v1/auth/change-password', { password })
+  }
+
+  listUsers(): Promise<CurrentUserDTO[]> {
+    return this.request<CurrentUserDTO[]>('GET', '/v1/admin/users')
+  }
+
+  createUser(username: string, password?: string): Promise<CurrentUserDTO> {
+    return this.request<CurrentUserDTO>('POST', '/v1/admin/users', { username, ...(password ? { password } : {}) })
+  }
+
+  resetUserPassword(userId: string, password?: string): Promise<void> {
+    return this.request<void>('POST', `/v1/admin/users/${encodeURIComponent(userId)}/reset-password`, password ? { password } : {})
+  }
+
+  getAdminUserData(userId: string): Promise<{ charts: HistoryDTO['charts']; threads: ChatThreadSummaryDTO[] }> {
+    return this.request('GET', `/v1/admin/users/${encodeURIComponent(userId)}/data`)
   }
 
   createChart(req: BirthRequest): Promise<ChartResultDTO> {
@@ -117,6 +153,18 @@ export class BaziClient {
 
   getReport(reportId: string): Promise<ReportViewDTO> {
     return this.request<ReportViewDTO>('GET', `/v1/reports/${encodeURIComponent(reportId)}`)
+  }
+
+  getReportGenerationTrace(reportId: string): Promise<Record<string, unknown>> {
+    return this.request('GET', `/v1/reports/${encodeURIComponent(reportId)}/generation-trace`)
+  }
+
+  listChatThreads(chartId: string): Promise<ChatThreadSummaryDTO[]> {
+    return this.request('GET', `/v1/charts/${encodeURIComponent(chartId)}/chat/threads`)
+  }
+
+  getChatThread(threadId: string): Promise<ChatThreadDTO> {
+    return this.request('GET', `/v1/chat/threads/${encodeURIComponent(threadId)}`)
   }
 
   startAnalysis(chartId: string, userFocus: string[]): Promise<AnalysisJobDTO> {

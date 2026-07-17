@@ -10,6 +10,8 @@ const client = useBaziClient()
 const professional = ref(false)
 const drawerOpen = ref(false)
 const selected = ref<ReportBlockDTO | null>(null)
+const generationTrace = ref<Record<string, unknown> | null>(null)
+const traceOpen = ref(false)
 const shareInfo = ref<{ share_id: string; share_token: string; expires_at: string } | null>(null)
 const useMocks = import.meta.env.VITE_USE_MOCKS === 'true'
 const { data, isLoading, isError, error } = useQuery<ReportViewDTO>({
@@ -43,6 +45,10 @@ function showEvidence(block: ReportBlockDTO) {
   selected.value = block
   drawerOpen.value = true
 }
+async function showGenerationTrace() {
+  generationTrace.value ??= await client.getReportGenerationTrace(props.reportId)
+  traceOpen.value = true
+}
 async function share() { shareInfo.value = await client.createShare(props.reportId) }
 async function revokeShare() {
   if (!shareInfo.value) return
@@ -71,6 +77,7 @@ function printReport() { window.print() }
       <div class="report-toolbar card-surface">
         <label class="switch-label"><input v-model="professional" type="checkbox" /><span>专业模式</span></label>
         <button type="button" @click="printReport">打印 / PDF</button>
+        <button type="button" @click="showGenerationTrace">查看生成过程</button>
         <button v-if="!printMode" type="button" @click="share">限时分享</button>
         <button v-if="shareInfo" type="button" @click="revokeShare">撤销</button>
       </div>
@@ -98,6 +105,13 @@ function printReport() { window.print() }
 
       <RouterLink class="full-primary-button button-link" :to="{ name: 'chart-chat', params: { chartId: data.chart_id } }">基于本命盘继续追问</RouterLink>
       <EvidenceDrawer :open="drawerOpen" :items="drawerItems" @close="drawerOpen = false" />
+      <div v-if="traceOpen" class="drawer-backdrop" @click.self="traceOpen = false">
+        <aside class="evidence-drawer generation-trace-drawer" role="dialog" aria-modal="true">
+          <header><div><p class="eyebrow">可审计分析轨迹</p><h2>报告生成过程</h2></div><button type="button" @click="traceOpen = false">关闭</button></header>
+          <p>包含实际 Prompt、命盘上下文、RAG 命中、模型原始输出、Reflection、验证和修复轮次。</p>
+          <pre>{{ JSON.stringify(generationTrace, null, 2) }}</pre>
+        </aside>
+      </div>
     </template>
   </section>
 </template>

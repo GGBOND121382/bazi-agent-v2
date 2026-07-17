@@ -103,6 +103,15 @@ class TestAnalysisAndReport:
             "analysis_id": "ana_1",
             "chart_id": "chart_1",
             "school": "ziping_standard",
+            "kinship_assessment": [
+                {"relation": name, "conclusion": "示例"}
+                for name in ["父亲", "母亲", "兄弟姐妹", "配偶婚恋", "子女", "家庭互动"]
+            ],
+            "health_assessment": [
+                {"dimension": name, "conclusion": "示例"}
+                for name in ["五行偏性", "寒暖燥湿", "传统脏腑", "保护因素", "大运变化", "生活建议"]
+            ],
+            "dayun_assessment": [{"stage": "出生至起运", "conclusion": "示例"}],
             "claims": [
                 {
                     "claim_id": "c1",

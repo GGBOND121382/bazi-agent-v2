@@ -59,6 +59,17 @@ class _ChartService:
                 "fact_id": f"LIUNIAN-{target_year}",
                 "rule_id": "LIUNIAN-CALENDAR-V1",
             },
+            interactions=[
+                {
+                    "fact_id": "TREL-CHAT",
+                    "type": "heaven_controls_earth_clashes",
+                    "label": "天克地冲",
+                    "participants": ["庚子", "甲午"],
+                    "temporal_positions": ["dayun", "liunian"],
+                    "rule_id": "PILLAR-TIANKEDICHONG-001",
+                }
+            ],
+            interaction_summary={"high_attention_count": 1},
             months=[
                 {
                     "index": index,
@@ -152,6 +163,8 @@ def test_fortune_chat_builds_deterministic_temporal_context_and_filters_citation
         "ren_yuan_commander"
     ] == "癸水用事"
     assert provider.input_payload["temporal_context"]["dayun"]["ganzhi"] == "辛卯"
+    assert provider.input_payload["temporal_context"]["temporal_interactions"][0]["type"] == "heaven_controls_earth_clashes"
+    assert provider.input_payload["analysis_context"]["model_boundary"]["must_use_precomputed_temporal_relations"] is True
     assert provider.input_payload["conversation_history"] == [
         {"role": "user", "content": "先看事业"}
     ]

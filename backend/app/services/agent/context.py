@@ -6,9 +6,11 @@ context object and marks any absent fields explicitly.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal, cast
 
 from ...api.dto import ChartResultDTO, TemporalContextViewDTO
+from ...domain.pillars import Branch, FourPillars, Pillar, Stem
+from ...domain.rules.temporal import describe_temporal_pillar
 
 _ANALYSIS_DIMENSIONS = (
     "月令与旺相休囚死",
@@ -20,8 +22,11 @@ _ANALYSIS_DIMENSIONS = (
     "扶抑调候病药通关及用相喜忌仇神",
     "纳音五行辅助校验",
     "神煞在原局结构中的喜忌与权重",
+    "出生至起运及全部大运的生命周期分析",
     "大运流年流月流日逐层触发",
-    "性格能力事业财运感情健康与应期",
+    "父母兄弟姐妹配偶子女的六亲星宫位与岁运",
+    "五行寒暖燥湿传统脏腑象义与健康岁运",
+    "性格能力事业财运感情六亲健康与应期",
 )
 
 
@@ -29,6 +34,46 @@ def _details(chart: ChartResultDTO) -> dict[str, Any]:
     raw = chart.calendar.get("deterministic_details", {})
     return dict(raw) if isinstance(raw, dict) else {}
 
+
+
+def _chart_pillars(chart: ChartResultDTO) -> FourPillars:
+    by_position = {str(item.position): item for item in chart.pillars}
+
+    def build(position: Literal["year", "month", "day", "hour"]) -> Pillar:
+        item = by_position[position]
+        return Pillar(Stem(item.stem), Branch(item.branch))
+
+    return FourPillars(
+        year=build("year"),
+        month=build("month"),
+        day=build("day"),
+        hour=build("hour"),
+    )
+
+
+def _enriched_dayun_table(
+    chart: ChartResultDTO, details: dict[str, Any]
+) -> list[dict[str, Any]]:
+    basic_raw = details.get("basic")
+    basic = cast(dict[str, Any], basic_raw) if isinstance(basic_raw, dict) else {}
+    gender = str(basic.get("gender", "unspecified"))
+    natal = _chart_pillars(chart)
+    result: list[dict[str, Any]] = []
+    for raw in chart.dayun or []:
+        if not isinstance(raw, dict):
+            continue
+        ganzhi = str(raw.get("ganzhi", ""))
+        if len(ganzhi) != 2:
+            result.append(dict(raw))
+            continue
+        enriched = describe_temporal_pillar(
+            natal,
+            Pillar(Stem(ganzhi[0]), Branch(ganzhi[1])),
+            scope="dayun",
+            gender=gender,
+        )
+        result.append({**dict(raw), **enriched})
+    return result
 
 def _missing_fields(details: dict[str, Any], chart: ChartResultDTO) -> list[str]:
     checks = {
@@ -55,7 +100,7 @@ def build_analysis_context(
     details = _details(chart)
     temporal_payload: dict[str, Any] = {
         "qiyun": chart.qiyun,
-        "dayun_table": chart.dayun or [],
+        "dayun_table": _enriched_dayun_table(chart, details),
         "precomputed_context": chart.temporal_context or [],
     }
     if temporal is not None:
@@ -66,13 +111,16 @@ def build_analysis_context(
                 "active_dayun": temporal.active_dayun,
                 "liunian": temporal.year,
                 "liuyue_table": temporal.months,
+                "selected_liuyue": temporal.selected_month,
                 "selected_liuri": temporal.selected_day,
+                "temporal_interactions": temporal.interactions,
+                "interaction_summary": temporal.interaction_summary,
                 "seasonal_strength": temporal.seasonal_strength,
             }
         )
 
     return {
-        "context_version": "bazi-analysis-context-v1",
+        "context_version": "bazi-analysis-context-v3",
         "fact_authority": "deterministic_engine_only",
         "immutable": True,
         "calculation": {
@@ -113,5 +161,10 @@ def build_analysis_context(
             "must_not_change_ten_gods_hidden_stems_nayin_relations_or_shensha": True,
             "may_interpret_strength_pattern_useful_gods_and_timing": True,
             "must_distinguish_fact_from_school_based_interpretation": True,
+            "kinship_requires_star_palace_and_temporal_trigger": True,
+            "health_requires_elements_climate_and_temporal_trigger": True,
+            "dayun_requires_birth_qiyun_and_every_period": True,
+            "must_use_precomputed_temporal_relations": True,
+            "must_not_infer_missing_fuyin_fanyin_tiankedichong_or_suiyun_binglin": True,
         },
     }

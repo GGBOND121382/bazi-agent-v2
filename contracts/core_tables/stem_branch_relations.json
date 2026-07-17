@@ -1,5 +1,5 @@
 {
-  "version": "core_rules_2026_01",
+  "version": "core_rules_2026_02-wenzhen-compatible",
   "stem_five_combinations": [
     {
       "pair": [
@@ -279,5 +279,95 @@
       ]
     }
   ],
-  "warning": "Combination is a relation candidate and does not by itself prove transformation."
+  "warning": "Combination, hidden combination and arching structures are candidates; none proves transformation by itself.",
+  "hidden_combinations": [
+    {
+      "pair": [
+        "午",
+        "亥"
+      ],
+      "hidden_stem_pairs": [
+        [
+          "丁",
+          "壬"
+        ],
+        [
+          "己",
+          "甲"
+        ]
+      ],
+      "element": null,
+      "variant": "wenzhen_compatible_v1"
+    },
+    {
+      "pair": [
+        "寅",
+        "未"
+      ],
+      "hidden_stem_pairs": [
+        [
+          "甲",
+          "己"
+        ]
+      ],
+      "element": "earth",
+      "variant": "wenzhen_compatible_v1"
+    },
+    {
+      "pair": [
+        "寅",
+        "戌"
+      ],
+      "hidden_stem_pairs": [
+        [
+          "丙",
+          "辛"
+        ]
+      ],
+      "element": "water",
+      "variant": "wenzhen_compatible_v1"
+    },
+    {
+      "pair": [
+        "子",
+        "辰"
+      ],
+      "hidden_stem_pairs": [
+        [
+          "癸",
+          "戊"
+        ]
+      ],
+      "element": "fire",
+      "variant": "wenzhen_compatible_v1"
+    },
+    {
+      "pair": [
+        "子",
+        "巳"
+      ],
+      "hidden_stem_pairs": [
+        [
+          "癸",
+          "戊"
+        ]
+      ],
+      "element": "fire",
+      "variant": "wenzhen_compatible_v1"
+    },
+    {
+      "pair": [
+        "申",
+        "辰"
+      ],
+      "hidden_stem_pairs": [
+        [
+          "戊",
+          "癸"
+        ]
+      ],
+      "element": "fire",
+      "variant": "wenzhen_compatible_v1"
+    }
+  ]
 }

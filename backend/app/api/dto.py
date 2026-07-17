@@ -180,7 +180,10 @@ class TemporalContextViewDTO(_Frozen):
     active_dayun: dict[str, Any] | None = None
     year: dict[str, Any]
     months: list[dict[str, Any]] = Field(min_length=12, max_length=12)
+    selected_month: dict[str, Any] | None = None
     selected_day: dict[str, Any] | None = None
+    interactions: list[dict[str, Any]] = Field(default_factory=list)
+    interaction_summary: dict[str, Any] = Field(default_factory=dict)
     seasonal_strength: dict[str, str] = Field(default_factory=dict)
 
 
@@ -242,6 +245,9 @@ class StructuredAnalysisDTO(_Frozen):
     reasoning_summary: list[ReasoningStepDTO] = Field(default_factory=list)
     structure_assessment: dict[str, Any] | None = None
     temporal_assessment: list[dict[str, Any]] = Field(default_factory=list)
+    kinship_assessment: list[dict[str, Any]] = Field(default_factory=list)
+    health_assessment: list[dict[str, Any]] = Field(default_factory=list)
+    dayun_assessment: list[dict[str, Any]] = Field(default_factory=list)
     claims: list[ClaimDTO]
     reflection: AnalysisReflectionDTO | None = None
     limitations: list[str]

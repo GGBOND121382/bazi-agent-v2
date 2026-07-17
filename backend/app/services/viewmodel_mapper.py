@@ -13,11 +13,15 @@ from ..api.dto import (
     WarningDTO,
 )
 from ..domain.chart import ChartResult
+from ..domain.profile import load_profile
 from ..domain.rules import evaluate_relations, evaluate_shensha
+from ..domain.rules.relations import RuleProfile
+from ..domain.rules.shensha import ShenshaRuleProfile
 
 _RELATION_LABELS = {
     "stem_combination": "天干五合",
     "stem_clash": "天干相冲",
+    "stem_control": "天干相克",
     "six_combination": "六合",
     "three_combination": "三合",
     "half_combination": "半合",
@@ -27,6 +31,19 @@ _RELATION_LABELS = {
     "harm": "六害",
     "break": "相破",
     "punishment": "相刑",
+    "punishment_trigger": "两支刑触发",
+    "hidden_combination": "暗合候选",
+    "arching_combination": "拱合候选",
+    "arching_meeting": "拱会候选",
+    "covering": "盖头",
+    "cut_foot": "截脚",
+    "fuyin": "伏吟（同柱）",
+    "stem_repeat": "天干同现",
+    "branch_repeat": "地支同现",
+    "fanyin": "反吟候选",
+    "heaven_controls_earth_clashes": "天克地冲",
+    "four_tombs_earth_structure": "四库齐全（土局候选）",
+    "competing_combination": "争合/妒合候选",
 }
 _ELEMENT_LABELS = {
     "wood": "木",
@@ -34,6 +51,11 @@ _ELEMENT_LABELS = {
     "earth": "土",
     "metal": "金",
     "water": "水",
+    "wood_controls_earth": "木克土",
+    "earth_controls_water": "土克水",
+    "water_controls_fire": "水克火",
+    "fire_controls_metal": "火克金",
+    "metal_controls_wood": "金克木",
 }
 
 
@@ -47,7 +69,12 @@ def _enriched_details(result: ChartResult) -> dict[str, object]:
     details = dict(result.details)
     raw_basic = details.get("basic")
     basic = raw_basic if isinstance(raw_basic, dict) else {}
-    hits = evaluate_shensha(result.pillars, gender=str(basic.get("gender", "unspecified")))
+    profile = load_profile()
+    hits = evaluate_shensha(
+        result.pillars,
+        gender=str(basic.get("gender", "unspecified")),
+        rule_profile=cast(ShenshaRuleProfile, profile.shensha_rule_profile),
+    )
     raw_pillars = details.get("pillars")
     enriched_pillars: list[dict[str, object]] = []
     if isinstance(raw_pillars, list):
@@ -70,6 +97,8 @@ def _enriched_details(result: ChartResult) -> dict[str, object]:
             "rule_version": hit.rule_version,
             "source_title": hit.source_title,
             "source_locator": hit.source_locator,
+            "anchor_position": hit.anchor_position,
+            "variant": hit.variant,
         }
         for hit in hits
     ]
@@ -172,8 +201,15 @@ def to_chart_overview_view_dto(result: ChartResult) -> ChartOverviewViewDTO:
             "participants": list(relation.branches),
             "element": _ELEMENT_LABELS.get(relation.element or "", relation.element),
             "rule_id": relation.rule_id,
+            "positions": list(relation.positions),
+            "direction": relation.direction,
+            "basis": list(relation.basis),
+            "variant": relation.variant,
         }
-        for relation in evaluate_relations(result.pillars)
+        for relation in evaluate_relations(
+            result.pillars,
+            rule_profile=cast(RuleProfile, load_profile().relation_rule_profile),
+        )
     ]
     five_elements_raw = details.get("five_elements")
     five_elements = (

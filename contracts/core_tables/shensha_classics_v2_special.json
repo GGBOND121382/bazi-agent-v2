@@ -412,20 +412,55 @@
       "reference": "day_pillar",
       "target_kind": "pillar",
       "values": [
-        "壬子",
-        "壬午",
+        "丁酉",
         "戊子",
         "戊午",
-        "己酉",
         "己卯",
-        "乙酉",
-        "乙卯",
+        "己酉",
+        "辛卯",
         "辛酉",
-        "辛卯"
+        "壬子",
+        "壬午"
       ],
       "source": {
-        "title": "《三命通会》",
-        "locator": "九丑乃壬子、壬午、戊子、戊午、己酉、己卯、乙酉、乙卯、辛酉、辛卯"
+        "title": "神煞大全（问真兼容口径）",
+        "locator": "九丑：丁酉、戊子、戊午、己卯、己酉、辛卯、辛酉、壬子、壬午；查日柱"
+      },
+      "variant": "wenzhen_compatible_v1"
+    },
+    {
+      "rule_id": "SHENSHA-JINSHEN-WZ-001",
+      "name": "金神",
+      "reference": "day_or_hour_pillar",
+      "target_kind": "pillar",
+      "values": [
+        "乙丑",
+        "己巳",
+        "癸酉"
+      ],
+      "target_positions": [
+        "day",
+        "hour"
+      ],
+      "variant": "wenzhen_compatible_v1",
+      "source": {
+        "title": "《渊海子平》论金神；神煞大全（问真兼容显示）",
+        "locator": "癸酉、己巳、乙丑；兼容口径查日柱或时柱，命中只作结构事实"
+      }
+    },
+    {
+      "rule_id": "SHENSHA-TONGZI-WZ-001",
+      "name": "童子煞",
+      "reference": "tongzi_season_nayin",
+      "target_kind": "branch",
+      "target_positions": [
+        "day",
+        "hour"
+      ],
+      "variant": "wenzhen_compatible_v1",
+      "source": {
+        "title": "神煞大全（问真兼容口径）",
+        "locator": "春秋日时见寅子，冬夏日时见卯未辰；年纳音金木见午卯、水火见酉戌、土见辰巳"
       }
     }
   ]

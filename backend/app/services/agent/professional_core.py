@@ -32,6 +32,7 @@ class AnalysisPipelineError(RuntimeError):
 _RELATION_LABELS = {
     "stem_combination": "天干五合",
     "stem_clash": "天干相冲",
+    "stem_control": "天干相克",
     "six_combination": "六合",
     "three_combination": "三合",
     "half_combination": "半合",
@@ -51,6 +52,9 @@ _REVISION_GUIDANCE = {
     "SCHOOL_MISMATCH": "analysis.school 必须逐字等于 analysis_profile.school；methodology_priority 不是 school 的可选值。",
     "CLAIM_SCHOOL_MISMATCH": "claim.school 应省略，或逐字等于 analysis_profile.school；不得填写 methodology_priority。",
     "POLICY_HIGH_RISK_ASSERTION": "改为条件、趋势和风险提示。",
+    "MISSING_KINSHIP_ASSESSMENT": "补全父亲、母亲、兄弟姐妹、配偶婚恋、子女和家庭互动六项，逐项结合六亲星、宫位与岁运触发。",
+    "MISSING_HEALTH_ASSESSMENT": "补全五行偏性、寒暖燥湿、传统脏腑象义、保护因素、大运变化和生活建议六项。",
+    "INCOMPLETE_DAYUN_ASSESSMENT": "从出生至起运开始，并按 dayun_table 原顺序逐柱补全全部大运。",
 }
 
 
@@ -144,6 +148,67 @@ def _reference_catalog(
     }
 
 
+def _substantive_items(items: list[dict[str, Any]]) -> int:
+    keys = {"conclusion", "summary", "analysis", "statement", "title", "relation", "dimension", "stage"}
+    return sum(
+        1
+        for item in items
+        if any(str(item.get(key, "")).strip() for key in keys)
+    )
+
+
+def _enforce_core_topic_coverage(
+    *,
+    chart: ChartResultDTO,
+    analysis: StructuredAnalysisDTO,
+    validation: ValidationResultDTO,
+) -> ValidationResultDTO:
+    """Fail the report gate when the three core topics are materially incomplete.
+
+    Prompt instructions alone are not sufficient for core product capabilities.  This
+    check feeds omissions back into the existing revision loop and prevents a formally
+    successful report from silently dropping 六亲、健康或任一步大运。
+    """
+    errors = list(validation.errors)
+    if _substantive_items(analysis.kinship_assessment) < 6:
+        errors.append(
+            {
+                "code": "MISSING_KINSHIP_ASSESSMENT",
+                "detail": "kinship_assessment must contain six substantive relation groups",
+            }
+        )
+    if _substantive_items(analysis.health_assessment) < 6:
+        errors.append(
+            {
+                "code": "MISSING_HEALTH_ASSESSMENT",
+                "detail": "health_assessment must contain six substantive dimensions",
+            }
+        )
+    expected_dayun_items = 1 + len(chart.dayun or [])
+    if _substantive_items(analysis.dayun_assessment) < expected_dayun_items:
+        errors.append(
+            {
+                "code": "INCOMPLETE_DAYUN_ASSESSMENT",
+                "detail": (
+                    "dayun_assessment must cover birth-to-qiyun and every deterministic "
+                    f"dayun item; expected at least {expected_dayun_items}"
+                ),
+            }
+        )
+    if len(errors) == len(validation.errors):
+        return validation
+    return validation.model_copy(
+        update={
+            "status": "failed",
+            "errors": errors,
+            "approved_claim_ids": [],
+            "required_revisions": sorted(
+                {str(error.get("code", "VALIDATION_ERROR")) for error in errors}
+            ),
+        }
+    )
+
+
 def _salvage(
     *,
     chart: ChartResultDTO,
@@ -180,6 +245,7 @@ class AnalysisPipelineResult:
     retrieval_trace_id: str
     model_id: str
     prompt_version: str
+    generation_trace: dict[str, Any]
 
 
 class AnalysisPipeline:
@@ -273,11 +339,26 @@ class AnalysisPipeline:
             "allowed_reference_ids": allowed_reference_ids,
             "professional_rubric": PROFESSIONAL_RUBRIC,
             "user_focus": list(user_focus),
+            "core_topic_contract": {
+                "kinship_assessment": {
+                    "required_relations": ["father", "mother", "siblings", "spouse_relationship", "children", "family_dynamics"],
+                    "method": "ten_god_mapping + palace + exposure_roots + favorability + temporal_trigger",
+                },
+                "health_assessment": {
+                    "required_dimensions": ["element_bias", "cold_heat_dry_wet", "traditional_organs", "protective_factors", "dayun_changes", "lifestyle_advice"],
+                    "medical_boundary": "traditional tendency, not medical diagnosis",
+                },
+                "dayun_assessment": {
+                    "required_scope": "birth_to_qiyun_then_every_item_in_analysis_context.temporal.dayun_table",
+                    "themes_per_period": ["structure", "career", "wealth", "relationship_kinship", "health", "transition_to_next"],
+                },
+            },
         }
 
         response: ProviderResponse | None = None
         analysis: StructuredAnalysisDTO | None = None
         validation: ValidationResultDTO | None = None
+        attempts: list[dict[str, Any]] = []
         for attempt in range(max_revisions + 1):
             if on_stage:
                 on_stage("interpreting")
@@ -301,6 +382,20 @@ class AnalysisPipeline:
                 analysis=analysis,
                 configured_school=school,
                 computed_relations=relations,
+            )
+            validation = _enforce_core_topic_coverage(
+                chart=chart, analysis=analysis, validation=validation
+            )
+            attempts.append(
+                {
+                    "attempt": attempt + 1,
+                    "input_payload": payload,
+                    "model_output": response.payload,
+                    "validation": validation.model_dump(mode="json"),
+                    "reflection": analysis.reflection.model_dump(mode="json")
+                    if analysis.reflection is not None
+                    else None,
+                }
             )
             reflection_failed = reflection_requires_revision(analysis)
             if (
@@ -343,6 +438,22 @@ class AnalysisPipeline:
                 model_id=response.model_id,
                 retrieval_trace_id=trace_id,
             )
+        generation_trace = {
+            "trace_type": "report_analysis",
+            "retrieval_trace_id": trace_id,
+            "prompt_version": response.prompt_version,
+            "model_id": response.model_id,
+            "system_prompt": INTERPRETER_SYSTEM_PROMPT,
+            "retrieval_plan": {
+                "queries": list(plan.queries),
+                "school": plan.school,
+                "task_type": plan.task_type,
+            },
+            "retrieved_evidence": [_serialize(item) for item in evidence],
+            "attempts": attempts,
+            "final_analysis": analysis.model_dump(mode="json"),
+            "final_validation": validation.model_dump(mode="json"),
+        }
         return AnalysisPipelineResult(
             analysis=analysis,
             validation=validation,
@@ -351,4 +462,5 @@ class AnalysisPipeline:
             retrieval_trace_id=trace_id,
             model_id=response.model_id,
             prompt_version=response.prompt_version,
+            generation_trace=generation_trace,
         )

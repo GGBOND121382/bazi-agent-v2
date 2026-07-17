@@ -53,6 +53,8 @@ def test_prompt_contains_required_professional_dimensions() -> None:
         "用神、相神、喜神、忌神、仇神",
         "纳音",
         "原局 → 当前大运 → 流年 → 流月 → 流日",
+        "temporal_interactions",
+        "天克地冲",
         "Reflection",
     ):
         assert term in INTERPRETER_SYSTEM_PROMPT
@@ -71,7 +73,10 @@ def test_context_contains_read_only_natal_and_temporal_facts() -> None:
     assert context["natal"]["pillars"][2]["ganzhi"] == "壬子"
     assert context["natal"]["relations"][0]["fact_id"] == "RELATION-01"
     assert context["temporal"]["dayun_table"][0]["ganzhi"] == "癸酉"
+    assert context["temporal"]["dayun_table"][0]["relations"]
+    assert all("fact_id" in item for item in context["temporal"]["dayun_table"][0]["relations"])
     assert context["model_boundary"]["must_not_recalculate_calendar_or_pillars"] is True
+    assert context["model_boundary"]["must_use_precomputed_temporal_relations"] is True
 
 
 def test_reflection_requests_revision_when_missing_or_failed() -> None:
@@ -100,3 +105,28 @@ def test_eval_cases_cover_current_chart_and_scoring_rubric() -> None:
     assert current["pillars"] == ["己卯", "庚午", "壬子", "丙午"]
     assert "reflection" in current["required_dimensions"]
     assert len(PROFESSIONAL_RUBRIC["dimensions"]) >= 10
+
+
+def test_core_prompt_requires_kinship_health_and_full_lifecycle_dayun() -> None:
+    for term in (
+        "父亲、母亲、兄弟姐妹、配偶婚恋、子女",
+        "六亲星状态",
+        "五行旺衰、寒暖燥湿、调候",
+        "不得把倾向写成确定疾病诊断",
+        "从出生至起运期开始",
+        "dayun_table 中每一柱大运",
+        "kinship_assessment",
+        "health_assessment",
+        "dayun_assessment",
+    ):
+        assert term in INTERPRETER_SYSTEM_PROMPT
+
+    context = build_analysis_context(
+        chart=_chart(),
+        computed_relations=[],
+        computed_shensha=[],
+    )
+    dimensions = context["required_analysis_dimensions"]
+    assert any("父母兄弟姐妹配偶子女" in item for item in dimensions)
+    assert any("健康" in item for item in dimensions)
+    assert context["model_boundary"]["dayun_requires_birth_qiyun_and_every_period"] is True

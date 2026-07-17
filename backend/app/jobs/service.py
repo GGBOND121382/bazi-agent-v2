@@ -8,6 +8,7 @@ from ..adapters.llm import DeepSeekProvider
 from ..services.agent import AnalysisPipeline
 from ..services.chart_service import ChartService, get_default_service
 from ..services.rag import DatasetV2Retriever
+from .sqlite_store import SQLiteAnalysisStore
 from .state import TERMINAL_STAGES, AnalysisJob, InMemoryAnalysisStore, JobStateError
 
 
@@ -31,7 +32,7 @@ class AnalysisJobService:
         *,
         chart_service: ChartService,
         pipeline_factory: Callable[[], AnalysisPipeline],
-        store: InMemoryAnalysisStore | None = None,
+        store: InMemoryAnalysisStore | SQLiteAnalysisStore | None = None,
     ) -> None:
         self.chart_service = chart_service
         self.pipeline_factory = pipeline_factory
@@ -95,7 +96,7 @@ class AnalysisJobService:
                 )
                 return
             report_view = _to_report_view(result.report)
-            self.store.save_result(result.analysis, report_view)
+            self.store.save_result(result.analysis, report_view, result.generation_trace)
             self.store.transition(
                 job_id,
                 stage="completed",
@@ -187,6 +188,7 @@ def default_pipeline() -> AnalysisPipeline:
 _DEFAULT = AnalysisJobService(
     chart_service=get_default_service(),
     pipeline_factory=default_pipeline,
+    store=SQLiteAnalysisStore(),
 )
 
 

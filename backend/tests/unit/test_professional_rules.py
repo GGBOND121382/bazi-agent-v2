@@ -42,7 +42,7 @@ def test_1995_reference_chart_matches_app_shensha_coverage() -> None:
     }
     assert len(hits) == 25
     assert all(hit.rule_id.startswith("SHENSHA-") for hit in hits)
-    assert all(hit.rule_version == "classics_v2.2-app-compatible" for hit in hits)
+    assert all(hit.rule_version == "classics_v2.3-wenzhen-compatible" for hit in hits)
     assert all(hit.source_title and hit.target_position for hit in hits)
 
 

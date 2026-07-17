@@ -23,7 +23,9 @@ def test_default_profile_loads():
     assert p.dayun.direction_rule == "gender_and_year_stem_yinyang"
     assert p.dayun.qiyun_conversion_days_per_year == 3
     assert p.dayun.dayun_period_years == 10
-    assert p.shensha_rule_set == "core_v1"
+    assert p.shensha_rule_set == "classics_v2.3-wenzhen-compatible"
+    assert p.relation_rule_profile == "wenzhen_compatible_v1"
+    assert p.shensha_rule_profile == "wenzhen_compatible_v1"
 
 
 def test_profile_deny_unknown_schema_version(tmp_path):

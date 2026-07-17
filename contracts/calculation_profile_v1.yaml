@@ -49,12 +49,16 @@ dayun:
   first_pillar_offset_from_month: 1
 
 relations:
+  rule_profile: wenzhen_compatible_v1
+  conservative_profile_available: ziping_conservative_v1
   combination_means_transformation: false
   enable_branch_break: true
   enable_self_punishment: true
 
 shensha:
-  rule_set: core_v1
+  rule_set: classics_v2.3-wenzhen-compatible
+  rule_profile: wenzhen_compatible_v1
+  conservative_profile_available: ziping_conservative_v1
   default_reference_priority:
     - day_stem
     - day_branch
@@ -69,6 +73,6 @@ analysis:
   prohibit_deterministic_life_event_claims: true
 
 versioning:
-  rule_version: core_rules_2026_01
-  prompt_version: prompts_2026_01
+  rule_version: core_rules_2026_02_wenzhen_compatible
+  prompt_version: prompts_2026_02
   report_schema_version: report-v1

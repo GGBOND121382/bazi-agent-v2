@@ -10,6 +10,7 @@ import type {
   TemporalDayunDTO,
   TemporalMonthDTO,
   TemporalPillarDetailDTO,
+  TemporalRelationDTO,
   TemporalShenshaDTO,
 } from '@/api/schema'
 
@@ -52,6 +53,7 @@ const isLoading = computed(() => temporalQuery.isLoading.value || chartQuery.isL
 const isError = computed(() => temporalQuery.isError.value || chartQuery.isError.value)
 const errorMessage = computed(() => temporalQuery.error.value?.message ?? chartQuery.error.value?.message ?? '未知错误')
 const activeDayun = computed(() => data.value?.active_dayun ?? null)
+const displayLiunianYear = computed(() => data.value?.year.lichun_year ?? data.value?.year.year ?? year.value)
 const selectedDayun = computed<TemporalDayunDTO | null>(() => {
   if (!data.value) return null
   return data.value.dayuns.find((item) => item.index === selectedDayunIndex.value)
@@ -78,7 +80,11 @@ const natalDetails = computed<Record<string, DeterministicPillarDetail>>(() => {
 
 const elementOrder = ['木', '火', '土', '金', '水']
 const positionOrder = ['year', 'month', 'day', 'hour'] as const
-const positionLabels: Record<string, string> = { year: '年柱', month: '月柱', day: '日柱', hour: '时柱' }
+const positionLabels: Record<string, string> = {
+  year: '年柱', month: '月柱', day: '日柱', hour: '时柱',
+  natal_year: '原局年柱', natal_month: '原局月柱', natal_day: '原局日柱', natal_hour: '原局时柱',
+  dayun: '大运', liunian: '流年', liuyue: '流月', liuri: '流日',
+}
 const stemClass: Record<string, string> = {
   甲: 'wood', 乙: 'wood', 丙: 'fire', 丁: 'fire', 戊: 'earth', 己: 'earth',
   庚: 'metal', 辛: 'metal', 壬: 'water', 癸: 'water',
@@ -167,9 +173,26 @@ const professionalColumns = computed<ProfessionalColumn[]>(() => {
 
 function relationText(item: TemporalPillarDetailDTO): string {
   return item.relations.map((relation) => {
-    const natal = relation.natal_position ? positionLabels[relation.natal_position] ?? relation.natal_position : '原局'
-    return `${natal}${relation.label}${relation.participants.join('')}`
+    const natalPositions = relation.natal_positions?.length
+      ? relation.natal_positions.map((position) => positionLabels[position] ?? position).join('、')
+      : relation.natal_position ? positionLabels[relation.natal_position] ?? relation.natal_position : '原局'
+    return `${natalPositions}${relation.label}${relation.participants.join('')}`
   }).join('｜') || '—'
+}
+
+function participantLabel(relation: TemporalRelationDTO): string {
+  if (relation.participant_positions?.length) {
+    return relation.participant_positions
+      .map((item) => `${positionLabels[item.position] ?? item.position} ${item.ganzhi}`)
+      .join(' ↔ ')
+  }
+  return relation.participants.join(' ↔ ')
+}
+
+function attentionLabel(relation: TemporalRelationDTO): string {
+  if (relation.attention === 'high_attention') return '重点结构'
+  if (relation.attention === 'attention') return '需关注'
+  return '结构关系'
 }
 
 function relationTextBy(item: TemporalPillarDetailDTO, kind: 'stem' | 'branch'): string {
@@ -221,8 +244,25 @@ const natalRelationText = computed(() => overview.value?.relationships.map((rela
         <div><span>当前流年</span><strong>{{ data.year.ganzhi }} · {{ data.year.stem_ten_god }}</strong><small>{{ data.year.age }}岁 · 小运 {{ data.year.xiaoyun ?? '—' }}</small></div>
       </section>
 
+
+      <section class="card-surface temporal-interaction-card" aria-label="岁运交叉关系">
+        <header>
+          <div><p class="eyebrow">确定性岁运交互</p><h2>大运、流年、流月、流日交叉作用</h2></div>
+          <small>重点 {{ data.interaction_summary.high_attention_count ?? 0 }} · 关注 {{ data.interaction_summary.attention_count ?? 0 }}</small>
+        </header>
+        <p class="interaction-note">{{ data.interaction_summary.note ?? '结构触发不直接等于吉凶结论。' }}</p>
+        <div v-if="data.interactions.length" class="interaction-list">
+          <article v-for="(relation, index) in data.interactions" :key="`${relation.rule_id}-${index}`" :class="`attention-${relation.attention ?? 'contextual'}`">
+            <div><strong>{{ relation.label }}</strong><span>{{ attentionLabel(relation) }}</span></div>
+            <p>{{ participantLabel(relation) }}</p>
+            <small v-if="relation.basis?.length">依据：{{ relation.basis.join(' + ') }}</small>
+          </article>
+        </div>
+        <p v-else class="state-inline">当前所选层级未检测到配置规则中的交叉关系。</p>
+      </section>
+
       <section id="professional-table" class="card-surface professional-table-card" aria-label="流年大运与四柱专业排盘">
-        <header><div><p class="eyebrow">同表对照</p><h2>{{ year }} 流年、大运与原局四柱</h2></div><small>横向滚动可查看全部六柱</small></header>
+        <header><div><p class="eyebrow">同表对照</p><h2>{{ displayLiunianYear }} 流年、大运与原局四柱</h2></div><small>横向滚动可查看全部六柱</small></header>
         <div class="professional-scroll" tabindex="0" aria-label="流年大运与原局四柱横向表格">
           <div class="professional-grid professional-header-row">
             <span>日期</span><strong v-for="column in professionalColumns" :key="column.key">{{ column.label }}</strong>
@@ -268,7 +308,7 @@ const natalRelationText = computed(() => overview.value?.relationships.map((rela
 
       <section class="fortune-summary-grid">
         <article class="dark-fortune-card">
-          <span>{{ year }} 流年 · {{ data.year.age }}岁</span>
+          <span>{{ displayLiunianYear }} 流年 · {{ data.year.age }}岁</span>
           <strong>{{ data.year.ganzhi }}</strong>
           <small>{{ data.year.stem_ten_god }} / {{ data.year.branch_ten_god }} · 小运 {{ data.year.xiaoyun ?? '—' }}</small>
           <p>{{ names(data.year.shensha) }}</p>
@@ -321,6 +361,19 @@ const natalRelationText = computed(() => overview.value?.relationships.map((rela
 </template>
 
 <style scoped>
+
+.temporal-interaction-card { padding: 18px; }
+.temporal-interaction-card > header { display: flex; justify-content: space-between; gap: 14px; align-items: end; }
+.interaction-note { color: var(--text-muted); line-height: 1.55; }
+.interaction-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.interaction-list article { border: 1px solid var(--border-soft); border-radius: 14px; padding: 12px; display: grid; gap: 6px; }
+.interaction-list article > div { display: flex; justify-content: space-between; gap: 8px; }
+.interaction-list article span { font-size: .72rem; color: var(--text-muted); }
+.interaction-list article p { margin: 0; line-height: 1.5; }
+.interaction-list article small { color: var(--text-muted); }
+.interaction-list .attention-high_attention { border-color: #b76845; background: color-mix(in srgb, #b76845 8%, var(--surface)); }
+.interaction-list .attention-attention { border-color: var(--gold-deep); }
+.state-inline { color: var(--text-muted); }
 .qiyun-card { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 18px; }
 .qiyun-card div { display: grid; gap: 5px; }
 .qiyun-card span, .qiyun-card small { color: var(--text-muted); }

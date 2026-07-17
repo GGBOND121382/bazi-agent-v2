@@ -21,6 +21,8 @@ _POSITION_ORDER = ("year", "month", "day", "hour")
 _BRANCH_GROUPS = ("申子辰", "寅午戌", "巳酉丑", "亥卯未")
 _SEASON_GROUPS = ("寅卯辰", "巳午未", "申酉戌", "亥子丑")
 TemporalScope = Literal["dayun", "liunian", "liuyue", "liuri", "liushi"]
+ShenshaRuleProfile = Literal["ziping_conservative_v1", "wenzhen_compatible_v1"]
+DEFAULT_SHENSHA_RULE_PROFILE: ShenshaRuleProfile = "wenzhen_compatible_v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,8 +297,10 @@ def _special_target_branch(rule: dict[str, Any], pillars: FourPillars, gender: s
     if group is None:
         return None
     if reference == "year_branch_goujiao":
-        steps = 3 if group == "yang_male_yin_female" else -3
-        return _offset_branch(pillars.year.branch.char, steps)
+        # Wenzhen-compatible display uses the third branch ahead as the hit.
+        # Sex and year-stem polarity only determine the role name; they do not
+        # reverse the target branch. The former reversal caused sample mismatches.
+        return _offset_branch(pillars.year.branch.char, 3)
     if reference == "year_branch_yuanchen":
         mapping = rule.get("mapping", {})
         if not isinstance(mapping, dict):
@@ -369,6 +373,55 @@ def _evaluate_special_natal(
 ) -> None:
     reference = str(rule.get("reference", ""))
     values = {str(item) for item in cast(list[object], rule.get("values", []))}
+    if reference == "day_or_hour_pillar":
+        for position, pillar in (("day", pillars.day), ("hour", pillars.hour)):
+            if pillar.ganzhi not in values:
+                continue
+            _add_hit(
+                bucket,
+                rule=rule,
+                reference="day_or_hour_pillar",
+                anchor=pillar.ganzhi,
+                anchor_position=position,
+                target=pillar.ganzhi,
+                target_position=position,
+                version=version,
+            )
+        return
+    if reference == "tongzi_season_nayin":
+        month_branch = pillars.month.branch.char
+        seasonal_targets = (
+            {"寅", "子"}
+            if month_branch in "寅卯辰申酉戌"
+            else {"卯", "未", "辰"}
+        )
+        nayin_element = _nayin_element(pillars.year)
+        nayin_targets = {
+            "金": {"午", "卯"},
+            "木": {"午", "卯"},
+            "水": {"酉", "戌"},
+            "火": {"酉", "戌"},
+            "土": {"辰", "巳"},
+        }.get(nayin_element, set())
+        for position, pillar in (("day", pillars.day), ("hour", pillars.hour)):
+            reasons: list[str] = []
+            if pillar.branch.char in seasonal_targets:
+                reasons.append(f"month_branch:{month_branch}")
+            if pillar.branch.char in nayin_targets:
+                reasons.append(f"year_nayin:{nayin_element}")
+            if not reasons:
+                continue
+            _add_hit(
+                bucket,
+                rule=rule,
+                reference="tongzi_season_nayin",
+                anchor=" / ".join(reasons),
+                anchor_position="month/year",
+                target=pillar.branch.char,
+                target_position=position,
+                version=version,
+            )
+        return
     if reference == "day_pillar":
         if pillars.day.ganzhi in values:
             _add_hit(
@@ -460,17 +513,37 @@ def _rules() -> tuple[str, list[dict[str, Any]]]:
     return version, [cast(dict[str, Any], item) for item in raw_rules if isinstance(item, dict)]
 
 
-def evaluate_shensha(pillars: FourPillars, *, gender: str = "unspecified") -> list[ShenShaHit]:
+
+def _rule_enabled(rule: dict[str, Any], rule_profile: ShenshaRuleProfile) -> bool:
+    """Filter compatibility-only rules when the conservative profile is selected."""
+    variant = str(rule.get("variant", "classical_or_common"))
+    return rule_profile == "wenzhen_compatible_v1" or variant != "wenzhen_compatible_v1"
+
+
+def evaluate_shensha(
+    pillars: FourPillars,
+    *,
+    gender: str = "unspecified",
+    rule_profile: ShenshaRuleProfile = DEFAULT_SHENSHA_RULE_PROFILE,
+) -> list[ShenShaHit]:
     """Evaluate natal shensha using APP-compatible anchor self-exclusion."""
     version, rules = _rules()
     bucket: dict[tuple[str, str], ShenShaHit] = {}
     for rule in rules:
+        if not _rule_enabled(rule, rule_profile):
+            continue
         reference = str(rule.get("reference", ""))
         if reference in {"year_branch_goujiao", "year_branch_yuanchen"}:
             _evaluate_gender_natal(
                 bucket, rule=rule, pillars=pillars, gender=gender, version=version
             )
-        elif reference in {"year_or_day_xunkong", "consecutive_stems", "day_pillar"}:
+        elif reference in {
+            "year_or_day_xunkong",
+            "consecutive_stems",
+            "day_pillar",
+            "day_or_hour_pillar",
+            "tongzi_season_nayin",
+        }:
             _evaluate_special_natal(bucket, rule=rule, pillars=pillars, version=version)
         else:
             _evaluate_mapped_natal(bucket, rule=rule, pillars=pillars, version=version)
@@ -488,11 +561,14 @@ def evaluate_shensha_for_target(
     target_position: TemporalScope,
     gender: str = "unspecified",
     season_branch: str | None = None,
+    rule_profile: ShenshaRuleProfile = DEFAULT_SHENSHA_RULE_PROFILE,
 ) -> list[ShenShaHit]:
     """Evaluate one external temporal pillar against the natal anchors."""
     version, rules = _rules()
     bucket: dict[tuple[str, str], ShenShaHit] = {}
     for rule in rules:
+        if not _rule_enabled(rule, rule_profile):
+            continue
         reference = str(rule.get("reference", ""))
         if reference in {"year_branch_goujiao", "year_branch_yuanchen"}:
             _evaluate_gender_target(
@@ -513,7 +589,11 @@ def evaluate_shensha_for_target(
                 target_position=target_position,
                 version=version,
             )
-        elif reference != "consecutive_stems":
+        elif reference not in {
+            "consecutive_stems",
+            "day_or_hour_pillar",
+            "tongzi_season_nayin",
+        }:
             _evaluate_mapped_target(
                 bucket,
                 rule=rule,

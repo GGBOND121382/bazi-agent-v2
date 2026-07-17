@@ -351,10 +351,10 @@
       "name": "勾绞煞",
       "reference": "year_branch_goujiao",
       "target_kind": "branch",
-      "variant": "性别与年干阴阳口径",
+      "variant": "wenzhen_compatible_v1",
       "source": {
-        "title": "神煞大全（现代常用查法）",
-        "locator": "阳男阴女顺数三位，阴男阳女逆数三位；以年支查余柱及岁运"
+        "title": "《三命通会》论勾绞；神煞大全（问真兼容显示）",
+        "locator": "命前三辰为展示命中位；阳男阴女称勾，阴男阳女称绞"
       }
     },
     {

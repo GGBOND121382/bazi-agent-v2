@@ -139,6 +139,10 @@ class TestReadAndDelete:
         assert temporal.status_code == 200
         assert temporal.json()["schema_version"] == "temporal-context-view-v1"
         assert len(temporal.json()["months"]) == 12
+        assert "interactions" in temporal.json()
+        assert "interaction_summary" in temporal.json()
+        assert temporal.json()["selected_month"] is not None
+        assert all("fact_id" in item for item in temporal.json()["year"]["relations"])
 
     def test_get_unknown_chart_404(self, client):
         r = client.get("/api/v1/charts/chart_nope")

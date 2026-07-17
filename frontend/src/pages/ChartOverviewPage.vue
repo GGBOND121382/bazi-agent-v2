@@ -20,6 +20,7 @@ type ShenshaDetail = {
   rule_version: string
   source_title: string
   source_locator: string
+  variant?: string
 }
 
 const props = defineProps<{ chartId: string }>()
@@ -88,6 +89,7 @@ const shenshaDetails = computed<ShenshaDetail[]>(() => {
       rule_version: String(value.rule_version ?? ''),
       source_title: String(value.source_title ?? ''),
       source_locator: String(value.source_locator ?? ''),
+      variant: String(value.variant ?? ''),
     }]
   })
 })
@@ -134,6 +136,14 @@ function detail(position: string): DeterministicPillarDetail | undefined {
 function relationElement(relation: ChartOverviewViewDTO['relationships'][number]): string {
   const value = (relation as unknown as Record<string, unknown>).element
   return typeof value === 'string' ? value : ''
+}
+
+function relationMeta(relation: ChartOverviewViewDTO['relationships'][number]): string {
+  const parts: string[] = []
+  if (relation.positions?.length) parts.push(relation.positions.map((item) => positionLabels[item] ?? item).join(' ↔ '))
+  if (relation.basis?.length) parts.push(`依据：${relation.basis.join(' + ')}`)
+  if (relation.variant === 'wenzhen_compatible_v1') parts.push('问真兼容候选')
+  return parts.join('；')
 }
 
 async function startAnalysis() {
@@ -212,7 +222,7 @@ async function startAnalysis() {
           <article v-for="item in shenshaDetails" :key="`${item.rule_id}-${item.target_position}`">
             <strong>{{ positionLabels[item.target_position] }} · {{ item.name }}</strong>
             <p>查法：{{ item.reference }} = {{ item.anchor }}；命中 {{ item.target }}</p>
-            <small>{{ item.source_title }}<template v-if="item.source_locator"> · {{ item.source_locator }}</template> · {{ item.rule_id }} · {{ item.rule_version }}</small>
+            <small>{{ item.source_title }}<template v-if="item.source_locator"> · {{ item.source_locator }}</template> · {{ item.rule_id }} · {{ item.rule_version }}<template v-if="item.variant"> · {{ item.variant }}</template></small>
           </article>
         </div>
       </details>
@@ -228,8 +238,10 @@ async function startAnalysis() {
         <article class="card-surface relation-panel">
           <header><h2>干支关系</h2><small>天干 + 地支完整规则</small></header>
           <p v-if="!overview.relationships.length">未检测到已配置规则中的显著关系。</p>
-          <div v-for="relation in overview.relationships" :key="`${relation.rule_id}-${relation.participants.join('')}`" class="relation-chip">
-            <strong>{{ relation.label }}<template v-if="relationElement(relation)"> · {{ relationElement(relation) }}</template></strong><span>{{ relation.participants.join(' · ') }}</span>
+          <div v-for="relation in overview.relationships" :key="`${relation.rule_id}-${relation.positions?.join('-')}-${relation.participants.join('')}`" class="relation-chip relation-chip-rich">
+            <strong>{{ relation.label }}<template v-if="relationElement(relation)"> · {{ relationElement(relation) }}</template></strong>
+            <span>{{ relation.participants.join(' · ') }}</span>
+            <small v-if="relationMeta(relation)">{{ relationMeta(relation) }}</small>
           </div>
         </article>
       </section>

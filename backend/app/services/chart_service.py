@@ -10,7 +10,7 @@ import uuid
 from dataclasses import replace
 from datetime import date
 
-from ..adapters.storage import ChartStore, InMemoryChartStore
+from ..adapters.storage import ChartStore, InMemoryChartStore, SQLiteChartStore
 from ..adapters.time import normalize
 from ..api.dto import BirthRequest, ChartResultDTO, TemporalContextViewDTO
 from ..domain.chart import ChartResult
@@ -98,6 +98,7 @@ class ChartService:
         idempotency_key: str,
         chart_id: str | None = None,
         profile: CalculationProfile | None = None,
+        owner_id: str = "anonymous",
     ) -> tuple[ChartResultDTO, str, bool]:
         """Idempotent create. Returns (dto, chart_id, created_now)."""
         existing = self.store.find_by_idempotency_key(idempotency_key)
@@ -159,7 +160,7 @@ class ChartService:
             details=details,
         )
 
-        self.store.save(result)
+        self.store.save(result, owner_id=owner_id)
         self.store.remember_idempotency_key(idempotency_key, chart_id)
         return to_chart_result_dto(result), chart_id, True
 
@@ -169,8 +170,8 @@ class ChartService:
             raise InvalidInputError(f"chart not found: {chart_id}")
         return to_chart_result_dto(_with_exact_yun(stored.chart))
 
-    def list_charts(self) -> list[str]:
-        return [s.chart_id for s in self.store.list_for_owner("anonymous")]
+    def list_charts(self, owner_id: str = "anonymous") -> list[str]:
+        return [s.chart_id for s in self.store.list_for_owner(owner_id)]
 
     def delete_chart(self, chart_id: str) -> bool:
         return self.store.delete(chart_id)
@@ -234,7 +235,10 @@ class ChartService:
             active_dayun=active if isinstance(active, dict) else None,
             year=year,
             months=context.get("months", []),
+            selected_month=context.get("selected_month"),
             selected_day=context.get("selected_day"),
+            interactions=context.get("interactions", []),
+            interaction_summary=context.get("interaction_summary", {}),
             seasonal_strength=context.get("seasonal_strength", {}),
         )
 
@@ -263,7 +267,7 @@ class ChartService:
         )
 
 
-_DEFAULT_SERVICE = ChartService()
+_DEFAULT_SERVICE = ChartService(store=SQLiteChartStore())
 
 
 def get_default_service() -> ChartService:

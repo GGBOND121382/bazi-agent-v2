@@ -110,6 +110,72 @@ class ReportAssembler:
                 }
             )
 
+        if analysis.dayun_assessment:
+            sections.append(
+                {
+                    "section_id": "dayun-lifecycle",
+                    "title": "一生大运运势",
+                    "content_blocks": [
+                        _report_block(
+                            block_id=f"DAYUN-{index:02d}",
+                            topic=str(item.get("title") or item.get("ganzhi") or item.get("stage") or "大运阶段"),
+                            statement=str(item.get("conclusion") or item.get("summary") or item.get("analysis") or _text(item)),
+                            confidence=float(item.get("confidence", 0.75)),
+                            fact_ids=[str(value) for value in item.get("fact_ids", [])],
+                            rule_ids=[str(value) for value in item.get("rule_ids", [])],
+                            evidence_ids=[str(value) for value in item.get("evidence_ids", [])],
+                            counterevidence=[str(value) for value in item.get("counterpoints", [])],
+                            temporal_scope=str(item.get("temporal_scope", "dayun")),
+                        )
+                        for index, item in enumerate(analysis.dayun_assessment, start=1)
+                    ],
+                }
+            )
+
+        if analysis.kinship_assessment:
+            sections.append(
+                {
+                    "section_id": "kinship",
+                    "title": "六亲与家庭关系",
+                    "content_blocks": [
+                        _report_block(
+                            block_id=f"KINSHIP-{index:02d}",
+                            topic=str(item.get("relation") or item.get("title") or "六亲分析"),
+                            statement=str(item.get("conclusion") or item.get("summary") or item.get("analysis") or _text(item)),
+                            confidence=float(item.get("confidence", 0.72)),
+                            fact_ids=[str(value) for value in item.get("fact_ids", [])],
+                            rule_ids=[str(value) for value in item.get("rule_ids", [])],
+                            evidence_ids=[str(value) for value in item.get("evidence_ids", [])],
+                            counterevidence=[str(value) for value in item.get("counterpoints", [])],
+                            temporal_scope=str(item.get("temporal_scope", "natal_and_dayun")),
+                        )
+                        for index, item in enumerate(analysis.kinship_assessment, start=1)
+                    ],
+                }
+            )
+
+        if analysis.health_assessment:
+            sections.append(
+                {
+                    "section_id": "health",
+                    "title": "健康倾向与调养",
+                    "content_blocks": [
+                        _report_block(
+                            block_id=f"HEALTH-{index:02d}",
+                            topic=str(item.get("dimension") or item.get("title") or "健康倾向"),
+                            statement=str(item.get("conclusion") or item.get("summary") or item.get("analysis") or _text(item)),
+                            confidence=float(item.get("confidence", 0.68)),
+                            fact_ids=[str(value) for value in item.get("fact_ids", [])],
+                            rule_ids=[str(value) for value in item.get("rule_ids", [])],
+                            evidence_ids=[str(value) for value in item.get("evidence_ids", [])],
+                            counterevidence=[str(value) for value in item.get("counterpoints", [])],
+                            temporal_scope=str(item.get("temporal_scope", "natal_and_dayun")),
+                        )
+                        for index, item in enumerate(analysis.health_assessment, start=1)
+                    ],
+                }
+            )
+
         if analysis.temporal_assessment:
             sections.append(
                 {
@@ -185,8 +251,14 @@ class ReportAssembler:
         used_evidence.update(
             eid for step in analysis.reasoning_summary for eid in step.evidence_ids
         )
-        for item in analysis.temporal_assessment:
-            used_evidence.update(str(eid) for eid in item.get("evidence_ids", []))
+        for group in (
+            analysis.temporal_assessment,
+            analysis.kinship_assessment,
+            analysis.health_assessment,
+            analysis.dayun_assessment,
+        ):
+            for item in group:
+                used_evidence.update(str(eid) for eid in item.get("evidence_ids", []))
         return {
             "schema_version": "report-v1",
             "report_id": f"report_{uuid.uuid4().hex[:12]}",

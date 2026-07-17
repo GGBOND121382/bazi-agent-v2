@@ -320,3 +320,23 @@ code { font-size: .75rem; overflow-wrap: anywhere; color: #695c45; }
   .app-shell { padding: 0; }.page-shell { width: 100%; padding: 0; }.report-page { max-width: none; }
   .claim-card { break-inside: avoid; box-shadow: none; border: 1px solid #ddd; }
 }
+
+/* Toy authentication/admin and audit additions. */
+.login-page { min-height: 72vh; display: grid; place-items: center; padding: 1.5rem; }
+.login-card { width: min(420px, 100%); display: grid; gap: 1rem; padding: 2rem; text-align: center; }
+.login-card label { display: grid; gap: .4rem; text-align: left; }
+.login-card input, .admin-create input, .chat-history-bar select, .field-row select { width: 100%; padding: .75rem; border: 1px solid var(--line-color, #ddd); border-radius: .7rem; background: var(--surface, #fff); }
+.admin-page { display: grid; gap: 1rem; }
+.admin-create { display: flex; gap: .7rem; padding: 1rem; }
+.admin-create input { flex: 1; }
+.admin-user-list { display: grid; gap: .75rem; }
+.admin-user-list article { display: flex; gap: .7rem; align-items: center; padding: 1rem; }
+.admin-user-list article div { display: grid; margin-right: auto; }
+.admin-inspector pre, .generation-trace-drawer pre, .generation-details pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 65vh; overflow: auto; padding: .8rem; border-radius: .6rem; background: rgba(0,0,0,.05); font-size: .78rem; }
+.generation-trace-drawer { width: min(920px, 94vw); }
+.chat-history-bar { display: flex; gap: .65rem; padding: .75rem; margin-bottom: .8rem; }
+.chat-history-bar select { flex: 1; }
+.nav-logout { border: 0; background: transparent; display: grid; justify-items: center; color: inherit; font: inherit; }
+
+.relation-chip-rich { align-items: flex-start; flex-direction: column; vertical-align: top; max-width: min(100%, 440px); }
+.relation-chip-rich small { color: #8b7a55; line-height: 1.45; white-space: normal; }

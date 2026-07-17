@@ -108,7 +108,17 @@ export type ChartOverviewViewDTO = {
   pillars: PillarViewDTO[]
   assumptions: { label: string; value: string }[]
   warnings: { severity: string; message: string }[]
-  relationships: { type: string; label: string; participants: string[]; rule_id: string }[]
+  relationships: {
+    type: string
+    label: string
+    participants: string[]
+    rule_id: string
+    element?: string | null
+    positions?: string[]
+    direction?: string | null
+    basis?: string[]
+    variant?: string
+  }[]
   five_elements?: { element: string; explicit: number; hidden: number; total?: number }[]
 }
 
@@ -147,7 +157,7 @@ export type AnalysisJobDTO = {
   error_code?: string | null
 }
 
-export type ChatScope = 'general' | 'year' | 'month' | 'day'
+export type ChatScope = 'general' | 'dayun' | 'lifecycle' | 'year' | 'month' | 'day'
 export type ChatTurnDTO = { role: 'user' | 'assistant'; content: string }
 export type FortuneChatRequestDTO = {
   question: string
@@ -155,6 +165,8 @@ export type FortuneChatRequestDTO = {
   target_date: string
   history?: ChatTurnDTO[]
   school?: string
+  thread_id?: string
+  target_dayun_index?: number
 }
 export type FortuneChatSectionDTO = {
   title: string
@@ -169,9 +181,12 @@ export type FortuneChatResponseDTO = {
   citations: { evidence_id: string; title?: string; source_id?: string; locator?: string }[]
   scope: ChatScope
   target_date: string
+  target_dayun_index?: number | null
   deterministic_context: Record<string, unknown>
   model_id: string
   prompt_version: string
+  thread_id: string
+  generation_trace: Record<string, unknown>
 }
 
 export type ApiErrorDTO = {
@@ -218,14 +233,27 @@ export type TemporalPillarDetailDTO = {
   xunkong: string
   nayin: string
   shensha: TemporalShenshaDTO[]
-  relations: {
-    type: string
-    label: string
-    participants: string[]
-    natal_position?: string
-    element?: string | null
-    rule_id: string
-  }[]
+  relations: TemporalRelationDTO[]
+  relation_summary?: Record<string, unknown>
+  temporal_interactions?: TemporalRelationDTO[]
+  interaction_summary?: Record<string, unknown>
+}
+
+export type TemporalRelationDTO = {
+  fact_id?: string
+  type: string
+  label: string
+  participants: string[]
+  participant_positions?: { position: string; ganzhi: string; stem?: string; branch?: string }[]
+  natal_position?: string
+  natal_positions?: string[]
+  temporal_positions?: string[]
+  element?: string | null
+  direction?: string | null
+  basis?: string[]
+  rule_id: string
+  attention?: 'contextual' | 'attention' | 'high_attention'
+  requires_interpretation?: boolean
 }
 
 export type TemporalDayunDTO = TemporalPillarDetailDTO & {
@@ -266,12 +294,15 @@ export type TemporalContextViewDTO = {
   active_dayun?: TemporalDayunDTO | null
   year: TemporalPillarDetailDTO & {
     year: number
+    civil_target_year?: number
+    lichun_year?: number
     age: number
     xiaoyun?: string | null
     fact_id: string
     rule_id: string
   }
   months: TemporalMonthDTO[]
+  selected_month?: TemporalMonthDTO | null
   selected_day?: TemporalPillarDetailDTO & {
     date: string
     lunar_date: string
@@ -279,6 +310,8 @@ export type TemporalContextViewDTO = {
     fact_id: string
     rule_id: string
   }
+  interactions: TemporalRelationDTO[]
+  interaction_summary: Record<string, unknown>
   seasonal_strength: Record<string, string>
 }
 
@@ -330,4 +363,35 @@ export type ConfigurationDTO = {
   model_provider: string
   model_configuration_read_only: boolean
   sharing_enabled: boolean
+}
+
+export type CurrentUserDTO = {
+  user_id: string
+  username: string
+  role: 'admin' | 'user'
+  enabled: boolean
+  must_change_password: boolean
+}
+
+export type ChatThreadSummaryDTO = {
+  thread_id: string
+  chart_id: string
+  title: string
+  scope: ChatScope
+  created_at: string
+  updated_at: string
+}
+
+export type ChatThreadDTO = {
+  thread: ChatThreadSummaryDTO & { owner_id?: string }
+  messages: {
+    role: 'user' | 'assistant'
+    content: string
+    payload?: {
+      sections?: FortuneChatSectionDTO[]
+      citations?: FortuneChatResponseDTO['citations']
+      generation_trace?: Record<string, unknown>
+    } | null
+    created_at: string
+  }[]
 }

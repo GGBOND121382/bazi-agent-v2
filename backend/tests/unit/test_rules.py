@@ -13,7 +13,12 @@ from app.domain.rules import (
     evaluate_relations,
     evaluate_shensha,
 )
-from app.domain.rules.temporal import build_temporal_context
+from app.domain.rules.relations import PositionedPillar, evaluate_positioned_relations
+from app.domain.rules.temporal import (
+    _cross_layer_relations,
+    build_temporal_context,
+    describe_temporal_pillar,
+)
 
 
 def _chart(*ganzhis: str) -> FourPillars:
@@ -227,3 +232,125 @@ def test_1999_reference_selected_liuri_fields_are_complete() -> None:
     assert selected_day["xunkong"] == "午未"
     assert selected_day["nayin"] == "长流水"
     assert isinstance(selected_day["shensha"], list)
+
+
+class TestPositionAwareTemporalRelations:
+    def test_temporal_target_keeps_natal_hour_pillar(self) -> None:
+        natal = _chart("甲寅", "乙卯", "丙辰", "庚午")
+        payload = describe_temporal_pillar(
+            natal,
+            Pillar(Stem("庚"), Branch("子")),
+            scope="liunian",
+            gender="male",
+        )
+        relations = _list_items(payload["relations"])
+        hour_clash = next(
+            item
+            for item in relations
+            if item["type"] == "clash" and item.get("natal_position") == "hour"
+        )
+        assert set(hour_clash["participants"]) == {"子", "午"}
+        assert hour_clash["participant_positions"][0]["position"] == "natal_hour"
+
+    def test_duplicate_characters_preserve_all_positions(self) -> None:
+        natal = _chart("甲午", "丙午", "戊辰", "庚午")
+        payload = describe_temporal_pillar(
+            natal,
+            Pillar(Stem("壬"), Branch("子")),
+            scope="liunian",
+            gender="male",
+        )
+        clashes = [
+            item
+            for item in _list_items(payload["relations"])
+            if item["type"] == "clash"
+        ]
+        assert {item["natal_position"] for item in clashes} == {"year", "month", "hour"}
+
+    def test_full_stem_control_is_deterministic_and_directed(self) -> None:
+        nodes = [
+            PositionedPillar("dayun", Pillar(Stem("甲"), Branch("子"))),
+            PositionedPillar("liunian", Pillar(Stem("戊"), Branch("辰"))),
+        ]
+        control = next(
+            item for item in evaluate_positioned_relations(nodes) if item.type == "stem_control"
+        )
+        assert control.symbols == ("甲", "戊")
+        assert control.direction == "dayun_controls_liunian"
+        assert control.rule_id == "STEM-FIVE-ELEMENT-CONTROL-001"
+
+    def test_fuyin_fanyin_and_tiankedichong_are_explicit(self) -> None:
+        same = [
+            PositionedPillar("dayun", Pillar(Stem("甲"), Branch("子"))),
+            PositionedPillar("liunian", Pillar(Stem("甲"), Branch("子"))),
+        ]
+        assert "fuyin" in {item.type for item in evaluate_positioned_relations(same)}
+
+        opposite = [
+            PositionedPillar("natal_day", Pillar(Stem("甲"), Branch("子"))),
+            PositionedPillar("liunian", Pillar(Stem("庚"), Branch("午"))),
+        ]
+        types = {item.type for item in evaluate_positioned_relations(opposite)}
+        assert {"stem_clash", "stem_control", "clash", "fanyin", "heaven_controls_earth_clashes"} <= types
+
+    def test_suiyun_binglin_is_explicit_cross_layer_relation(self) -> None:
+        interactions = _cross_layer_relations(
+            [
+                ("dayun", {"ganzhi": "甲子"}),
+                ("liunian", {"ganzhi": "甲子"}),
+            ]
+        )
+        hit = next(item for item in interactions if item["type"] == "suiyun_binglin")
+        assert hit["attention"] == "high_attention"
+        assert hit["rule_id"] == "TEMPORAL-SUIYUN-BINGLIN-001"
+
+    def test_cross_layer_three_combination_is_detected(self) -> None:
+        interactions = _cross_layer_relations(
+            [
+                ("dayun", {"ganzhi": "壬申"}),
+                ("liunian", {"ganzhi": "甲子"}),
+                ("liuyue", {"ganzhi": "丙辰"}),
+            ]
+        )
+        triple = next(item for item in interactions if item["type"] == "three_combination")
+        assert set(triple["participants"]) == {"申", "子", "辰"}
+        assert set(triple["temporal_positions"]) == {"dayun", "liunian", "liuyue"}
+
+
+def test_reference_context_exposes_selected_month_and_cross_layer_interactions() -> None:
+    context = _reference_temporal_context()
+    selected_month = _dict_item(context["selected_month"])
+    assert selected_month["ganzhi"] == "乙未"
+    assert isinstance(context["interactions"], list)
+    assert _dict_item(context["interaction_summary"])["total"] == len(context["interactions"])
+
+
+def test_pre_lichun_date_uses_previous_liunian_and_month() -> None:
+    context = build_temporal_context(
+        _chart("己卯", "庚午", "壬子", "丙午"),
+        datetime(1999, 6, 29, 12, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        gender="female",
+        target_year=2026,
+        target_date=date(2026, 1, 10),
+    )
+    year = _dict_item(context["year"])
+    selected_month = _dict_item(context["selected_month"])
+    selected_day = _dict_item(context["selected_day"])
+    assert year["civil_target_year"] == 2026
+    assert year["lichun_year"] == 2025
+    assert year["ganzhi"] == "乙巳"
+    assert selected_month["ganzhi"] == "己丑"
+    assert selected_day["month_ganzhi"] == "己丑"
+
+
+def test_post_lichun_date_uses_new_liunian() -> None:
+    context = build_temporal_context(
+        _chart("己卯", "庚午", "壬子", "丙午"),
+        datetime(1999, 6, 29, 12, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        gender="female",
+        target_year=2026,
+        target_date=date(2026, 2, 5),
+    )
+    year = _dict_item(context["year"])
+    assert year["lichun_year"] == 2026
+    assert year["ganzhi"] == "丙午"

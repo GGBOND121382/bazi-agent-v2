@@ -8,6 +8,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Header, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from ...auth import CurrentUser, require_user
 from ...domain.errors import InvalidInputError
 from ...domain.profile import load_profile
 from ...jobs import AnalysisJobService, JobStateError, get_default_analysis_service
@@ -50,7 +51,9 @@ def _charts() -> ChartService:
 
 @router.get("/history")
 def history(
-    charts: ChartService = Depends(_charts), jobs: AnalysisJobService = Depends(_jobs)
+    charts: ChartService = Depends(_charts),
+    jobs: AnalysisJobService = Depends(_jobs),
+    user: CurrentUser = Depends(require_user),
 ) -> dict[str, Any]:
     chart_items = [
         {
@@ -59,8 +62,9 @@ def history(
             "created_at": item.created_at.isoformat(),
             "note": item.note,
         }
-        for item in charts.store.list_for_owner("anonymous")
+        for item in charts.store.list_for_owner("*" if user.is_admin else user.user_id)
     ]
+    allowed_chart_ids = {item["chart_id"] for item in chart_items}
     report_items = [
         {
             "report_id": item["report_id"],
@@ -69,14 +73,21 @@ def history(
             "generated_at": item["generated_at"],
         }
         for item in jobs.store.list_reports()
+        if item["chart_id"] in allowed_chart_ids
     ]
     return {"charts": chart_items, "reports": report_items}
 
 
 @router.patch("/charts/{chart_id}/note", status_code=status.HTTP_204_NO_CONTENT)
 def set_chart_note(
-    chart_id: str, request: NoteRequest, charts: ChartService = Depends(_charts)
+    chart_id: str,
+    request: NoteRequest,
+    charts: ChartService = Depends(_charts),
+    user: CurrentUser = Depends(require_user),
 ) -> None:
+    stored = charts.store.get(chart_id)
+    if stored is None or (not user.is_admin and stored.owner_id != user.user_id):
+        raise InvalidInputError("chart not found")
     charts.set_note(chart_id, request.note)
 
 

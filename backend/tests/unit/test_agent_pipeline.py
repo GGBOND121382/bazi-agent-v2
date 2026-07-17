@@ -71,6 +71,17 @@ def _analysis(**claim_overrides: Any) -> StructuredAnalysisDTO:
         analysis_id="analysis_test",
         chart_id="chart_test",
         school="engineering_policy",
+        kinship_assessment=[
+            {"relation": name, "conclusion": "结合六亲星、宫位和岁运分析。"}
+            for name in ["父亲", "母亲", "兄弟姐妹", "配偶婚恋", "子女", "家庭互动"]
+        ],
+        health_assessment=[
+            {"dimension": name, "conclusion": "结合原局偏性和岁运变化分析。"}
+            for name in ["五行偏性", "寒暖燥湿", "传统脏腑", "保护因素", "大运变化", "生活建议"]
+        ],
+        dayun_assessment=[
+            {"stage": "出生至起运", "conclusion": "说明起运前阶段。"}
+        ],
         claims=[claim],
         limitations=[],
     )
@@ -266,6 +277,7 @@ def test_pipeline_salvages_only_claims_that_pass_the_deterministic_gate() -> Non
         block["claim_id"]
         for section in result.report["sections"]
         for block in section["content_blocks"]
+        if str(block["claim_id"]).startswith("CLAIM-")
     }
     assert report_claim_ids == {"CLAIM-1"}
 
@@ -289,3 +301,48 @@ def test_report_assembler_rejects_failed_validation() -> None:
             model_id="mock",
             retrieval_trace_id="trace",
         )
+
+
+@pytest.mark.rag
+def test_report_contains_dedicated_kinship_health_and_lifecycle_dayun_sections() -> None:
+    payload = _analysis().model_dump(mode="json")
+    payload.update(
+        {
+            "kinship_assessment": [
+                {
+                    "relation": name,
+                    "conclusion": "结合六亲星、宫位与岁运分析。",
+                    "fact_ids": ["FACT-TRACE"],
+                    "rule_ids": ["RULE-SEED-009"],
+                    "evidence_ids": ["RULE-SEED-009"],
+                }
+                for name in ["父亲", "母亲", "兄弟姐妹", "配偶婚恋", "子女", "家庭互动"]
+            ],
+            "health_assessment": [
+                {
+                    "dimension": name,
+                    "conclusion": "区分长期偏性、保护因素与大运触发。",
+                    "fact_ids": ["FACT-TRACE"],
+                    "rule_ids": ["RULE-SEED-009"],
+                    "evidence_ids": ["RULE-SEED-009"],
+                }
+                for name in ["五行偏性", "寒暖燥湿", "传统脏腑", "保护因素", "大运变化", "生活建议"]
+            ],
+            "dayun_assessment": [
+                {
+                    "title": "出生至起运",
+                    "conclusion": "说明起运前阶段与后续大运承接。",
+                    "fact_ids": ["FACT-TRACE"],
+                    "rule_ids": ["RULE-SEED-009"],
+                    "evidence_ids": ["RULE-SEED-009"],
+                }
+            ],
+        }
+    )
+    result = AnalysisPipeline(provider=_MockProvider(payload), retriever=_evidence()).run(
+        chart=_chart(), user_focus=("引用必须可追溯",)
+    )
+    assert result.report is not None
+    section_ids = {section["section_id"] for section in result.report["sections"]}
+    assert {"kinship", "health", "dayun-lifecycle"} <= section_ids
+    assert result.generation_trace["attempts"]

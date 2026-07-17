@@ -73,6 +73,7 @@ class InMemoryAnalysisStore:
         self._reports: dict[str, dict[str, Any]] = {}
         self._analyses: dict[str, StructuredAnalysisDTO] = {}
         self._shares: dict[str, ShareRecord] = {}
+        self._traces: dict[str, dict[str, Any]] = {}
 
     def create(
         self, *, chart_id: str, user_focus: tuple[str, ...], school: str, idempotency_key: str
@@ -149,15 +150,25 @@ class InMemoryAnalysisStore:
             return tuple(event for event in events if int(event.event_id) > int(last_event_id))
 
     def save_result(
-        self, analysis: StructuredAnalysisDTO, report_view: dict[str, Any]
+        self,
+        analysis: StructuredAnalysisDTO,
+        report_view: dict[str, Any],
+        generation_trace: dict[str, Any] | None = None,
     ) -> None:
         with self._lock:
             self._analyses[analysis.analysis_id] = analysis
-            self._reports[str(report_view["report_id"])] = report_view
+            report_id = str(report_view["report_id"])
+            self._reports[report_id] = report_view
+            if generation_trace is not None:
+                self._traces[report_id] = generation_trace
 
     def get_report(self, report_id: str) -> dict[str, Any] | None:
         with self._lock:
             return self._reports.get(report_id)
+
+    def get_report_trace(self, report_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            return self._traces.get(report_id)
 
     def get_analysis(self, analysis_id: str) -> StructuredAnalysisDTO | None:
         with self._lock:

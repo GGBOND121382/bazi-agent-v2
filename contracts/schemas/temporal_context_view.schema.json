@@ -12,7 +12,9 @@
     "dayuns",
     "year",
     "months",
-    "seasonal_strength"
+    "seasonal_strength",
+    "interactions",
+    "interaction_summary"
   ],
   "properties": {
     "schema_version": {
@@ -72,6 +74,21 @@
       "additionalProperties": {
         "type": "string"
       }
+    },
+    "selected_month": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "interactions": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "interaction_summary": {
+      "type": "object"
     }
   }
 }
