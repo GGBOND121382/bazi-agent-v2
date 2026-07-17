@@ -49,8 +49,6 @@ const report = {
 }
 
 async function mockApi(page: Page) {
-  // Register the exact chart route first; Playwright checks routes in reverse
-  // order, so more specific sub-resources registered below take precedence.
   await page.route(/\/api\/v1\/charts\/chart_demo$/, (route) => route.fulfill({ json: chart }))
   await page.route('**/api/v1/charts/chart_demo/overview-view', (route) => route.fulfill({ json: overview }))
   const temporalDetail = (ganzhi: string, stemTenGod = '正财', branchTenGod = '正官') => ({
@@ -95,7 +93,7 @@ test.beforeEach(async ({ page }) => { await mockApi(page) })
 test('landing', async ({ page }, testInfo) => { await page.goto('/'); await expect(page.getByRole('heading', { level: 1 })).toBeVisible(); await assertAccessible(page); await capture(page, testInfo, 'landing') })
 test('redesigned birth form', async ({ page }, testInfo) => { await page.goto('/charts/new'); await expect(page.getByRole('heading', { name: '建立命盘' })).toBeVisible(); await expect(page.getByTestId('submit')).toBeVisible(); await assertAccessible(page); await capture(page, testInfo, 'wizard') })
 test('detailed chart overview', async ({ page }, testInfo) => { await page.goto('/charts/chart_demo'); await expect(page.getByLabel('四柱排盘')).toBeVisible(); await expect(page.getByText('癸水用事')).toBeVisible(); await assertAccessible(page); await capture(page, testInfo, 'overview') })
-test('temporal context', async ({ page }, testInfo) => { await page.goto('/charts/chart_demo/temporal'); await expect(page.getByText('2026 流年')).toBeVisible(); await assertAccessible(page); await capture(page, testInfo, 'temporal') })
+test('temporal context', async ({ page }, testInfo) => { await page.goto('/charts/chart_demo/temporal'); await expect(page.getByRole('heading', { name: '2026 流年、大运与原局四柱' })).toBeVisible(); await expect(page.getByLabel('流年大运与四柱专业排盘')).toBeVisible(); await assertAccessible(page); await capture(page, testInfo, 'temporal') })
 test('chart-aware fortune chat', async ({ page }, testInfo) => { await page.goto('/charts/chart_demo/chat'); await page.getByPlaceholder(/今年哪几个月/).fill('今年事业和财运怎么样？'); await page.getByRole('button', { name: '发送问题' }).click(); await expect(page.getByText(/今年事业宜主动争取/)).toBeVisible(); await assertAccessible(page); await capture(page, testInfo, 'chat') })
 test('analysis progress hides chain of thought', async ({ page }, testInfo) => { await page.goto('/jobs/job_demo'); await expect(page.getByText('不展示模型内部思维链')).toBeVisible(); await assertAccessible(page); await capture(page, testInfo, 'progress') })
 test('report and evidence drawer', async ({ page }, testInfo) => { await page.goto('/reports/report_demo'); await page.getByRole('button', { name: '查看命盘事实与参考资料' }).click(); await expect(page.getByRole('dialog')).toBeVisible(); await assertAccessible(page); await capture(page, testInfo, 'report-evidence') })
