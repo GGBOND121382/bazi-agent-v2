@@ -1,20 +1,15 @@
 <#
-start.ps1 — 一键后台启动后端 + 前端
+start.ps1 — 一键后台启动后端和前端。
 
 用法:
-    .\start.ps1                                  # 默认后台启动，终端立即返回
-    .\start.ps1 -Mock                            # Mock 模式后台启动
-    .\start.ps1 -Wait                            # 前台等待并显示启动过程，便于排错
+    .\start.ps1
+    .\start.ps1 -Mock
+    .\start.ps1 -Wait
     .\start.ps1 -BackendPort 9000 -FrontendPort 5174
 
-行为:
-    - 默认创建独立后台启动进程，当前 PowerShell 立即恢复可用
-    - 创建 .runtime/ 保存 PID、端口、启动状态与日志
-    - 精确显示端口占用进程，不再只提示“端口被占用”
-    - 首次启动可安装依赖
-    - 从 ..\deepseek-apikey 读取 API key，不回显
-    - 后端 uvicorn 与前端 Vite 均为后台进程
-    - 使用真实总截止时间执行健康检查，失败时自动回滚
+默认在隐藏的后台 PowerShell 中完成依赖检查、服务启动和健康检查，
+当前终端会立即恢复。使用 -Wait 可在当前终端观察启动过程。
+兼容 Windows PowerShell 5.1。
 #>
 
 [CmdletBinding()]
@@ -44,34 +39,51 @@ $BackendErr = Join-Path $RuntimeDir 'backend.err.log'
 $FrontendLog = Join-Path $RuntimeDir 'frontend.out.log'
 $FrontendErr = Join-Path $RuntimeDir 'frontend.err.log'
 
-if (-not (Test-Path $RuntimeDir)) {
+if (-not (Test-Path -LiteralPath $RuntimeDir)) {
     New-Item -ItemType Directory -Path $RuntimeDir | Out-Null
 }
 
 function Get-TrackedProcess {
     param([string]$PidFile)
 
-    if (-not (Test-Path $PidFile)) { return $null }
-    $procId = (Get-Content $PidFile -Raw).Trim()
-    if ($procId -notmatch '^\d+$') { return $null }
-    return Get-Process -Id ([int]$procId) -ErrorAction SilentlyContinue
+    if (-not (Test-Path -LiteralPath $PidFile)) {
+        return $null
+    }
+
+    $value = (Get-Content -LiteralPath $PidFile -Raw).Trim()
+    if ($value -notmatch '^\d+$') {
+        return $null
+    }
+
+    return Get-Process -Id ([int]$value) -ErrorAction SilentlyContinue
 }
 
 function Get-PortOwner {
     param([int]$Port)
 
-    $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-    if ($null -eq $listener) { return $null }
+    $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+    if ($listeners.Count -eq 0) {
+        return $null
+    }
 
-    $procId = [int]$listener.OwningProcess
-    $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction SilentlyContinue
-    $process = Get-Process -Id $procId -ErrorAction SilentlyContinue
+    $processId = [int]$listeners[0].OwningProcess
+    $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+    $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
+
+    $processName = '<unknown>'
+    if ($null -ne $process) {
+        $processName = $process.ProcessName
+    }
+
+    $commandLine = '<unavailable>'
+    if ($null -ne $cim) {
+        $commandLine = [string]$cim.CommandLine
+    }
 
     return [PSCustomObject]@{
-        Pid = $procId
-        Name = if ($null -ne $process) { $process.ProcessName } else { '<unknown>' }
-        CommandLine = if ($null -ne $cim) { $cim.CommandLine } else { '<unavailable>' }
+        Pid = $processId
+        Name = $processName
+        CommandLine = $commandLine
     }
 }
 
@@ -80,14 +92,16 @@ function Assert-PortsAvailable {
         throw '前后端端口不能相同。'
     }
 
-    foreach ($item in @(
+    $checks = @(
         [PSCustomObject]@{ Name = '后端'; Port = $BackendPort },
         [PSCustomObject]@{ Name = '前端'; Port = $FrontendPort }
-    )) {
+    )
+
+    foreach ($item in $checks) {
         $owner = Get-PortOwner -Port $item.Port
         if ($null -ne $owner) {
-            throw ("{0}端口 {1} 已被占用：PID={2}，进程={3}`n命令行：{4}`n先运行 .\stop.ps1，或修改端口后重试。" -f `
-                $item.Name, $item.Port, $owner.Pid, $owner.Name, $owner.CommandLine)
+            $message = "{0}端口 {1} 已被占用：PID={2}，进程={3}`n命令行：{4}`n先运行 .\stop.ps1，或修改端口后重试。" -f $item.Name, $item.Port, $owner.Pid, $owner.Name, $owner.CommandLine
+            throw $message
         }
     }
 }
@@ -100,16 +114,38 @@ function Wait-HttpReady {
     )
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    do {
+    while ((Get-Date) -lt $deadline) {
         try {
             $response = Invoke-WebRequest -Uri $Uri -UseBasicParsing -TimeoutSec 1
-            if ($response.StatusCode -eq 200) { return $true }
-        } catch { }
+            if ($response.StatusCode -eq 200) {
+                return $true
+            }
+        } catch {
+        }
         Start-Sleep -Milliseconds 300
-    } while ((Get-Date) -lt $deadline)
+    }
 
-    Write-Host "TIMEOUT $Description 在 ${TimeoutSeconds}s 内未就绪：$Uri" -ForegroundColor Red
+    Write-Host "TIMEOUT $Description 在 $TimeoutSeconds 秒内未就绪：$Uri" -ForegroundColor Red
     return $false
+}
+
+function Find-PowerShellExecutable {
+    $currentProcess = Get-Process -Id $PID -ErrorAction SilentlyContinue
+    if (($null -ne $currentProcess) -and (-not [string]::IsNullOrWhiteSpace($currentProcess.Path))) {
+        return $currentProcess.Path
+    }
+
+    $windowsPowerShell = Join-Path $PSHOME 'powershell.exe'
+    if (Test-Path -LiteralPath $windowsPowerShell) {
+        return $windowsPowerShell
+    }
+
+    $powerShellCore = Join-Path $PSHOME 'pwsh.exe'
+    if (Test-Path -LiteralPath $powerShellCore) {
+        return $powerShellCore
+    }
+
+    throw '无法定位 PowerShell 可执行文件。'
 }
 
 function Start-DetachedWorker {
@@ -117,112 +153,106 @@ function Start-DetachedWorker {
     if ($null -ne $startupProcess) {
         throw "已有启动任务正在运行，PID=$($startupProcess.Id)。运行 .\status.ps1 查看状态。"
     }
-    Remove-Item $StartupPidFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $StartupPidFile -Force -ErrorAction SilentlyContinue
 
-    if ($null -ne (Get-TrackedProcess -PidFile $BackendPidFile)) {
-        throw "后端已在运行。先运行 .\stop.ps1。"
+    $backendProcess = Get-TrackedProcess -PidFile $BackendPidFile
+    $frontendProcess = Get-TrackedProcess -PidFile $FrontendPidFile
+    if ($null -ne $backendProcess) {
+        throw '后端已在运行。先运行 .\stop.ps1。'
     }
-    if ($null -ne (Get-TrackedProcess -PidFile $FrontendPidFile)) {
-        throw "前端已在运行。先运行 .\stop.ps1。"
+    if ($null -ne $frontendProcess) {
+        throw '前端已在运行。先运行 .\stop.ps1。'
     }
+
     Assert-PortsAvailable
+    Remove-Item -LiteralPath $StartupOutLog -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $StartupErrLog -Force -ErrorAction SilentlyContinue
 
-    Remove-Item $StartupOutLog,$StartupErrLog -Force -ErrorAction SilentlyContinue
-
-    $powerShellExe = (Get-Process -Id $PID).Path
-    if ([string]::IsNullOrWhiteSpace($powerShellExe)) {
-        $candidate = Join-Path $PSHOME 'powershell.exe'
-        if (-not (Test-Path $candidate)) { $candidate = Join-Path $PSHOME 'pwsh.exe' }
-        $powerShellExe = $candidate
-    }
-
+    $powerShellExe = Find-PowerShellExecutable
+    $quotedScriptPath = '"{0}"' -f $PSCommandPath
     $arguments = @(
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
-        '-File', ('"{0}"' -f $PSCommandPath),
+        '-File', $quotedScriptPath,
         '-Worker',
-        '-BackendPort', "$BackendPort",
-        '-FrontendPort', "$FrontendPort"
+        '-BackendPort', [string]$BackendPort,
+        '-FrontendPort', [string]$FrontendPort
     )
-    if ($SkipInstall) { $arguments += '-SkipInstall' }
-    if ($Mock) { $arguments += '-Mock' }
+    if ($SkipInstall) {
+        $arguments += '-SkipInstall'
+    }
+    if ($Mock) {
+        $arguments += '-Mock'
+    }
 
-    $process = Start-Process -FilePath $powerShellExe `
-        -ArgumentList $arguments `
-        -WorkingDirectory $ProjectRoot `
-        -RedirectStandardOutput $StartupOutLog `
-        -RedirectStandardError $StartupErrLog `
-        -WindowStyle Hidden `
-        -PassThru
+    $startup = Start-Process -FilePath $powerShellExe -ArgumentList $arguments -WorkingDirectory $ProjectRoot -RedirectStandardOutput $StartupOutLog -RedirectStandardError $StartupErrLog -WindowStyle Hidden -PassThru
+    $startup.Id | Set-Content -LiteralPath $StartupPidFile -NoNewline
 
-    $process.Id | Set-Content $StartupPidFile -NoNewline
-    Start-Sleep -Milliseconds 250
-
-    if ($process.HasExited) {
+    Start-Sleep -Milliseconds 350
+    if ($startup.HasExited) {
         $details = ''
-        if (Test-Path $StartupErrLog) {
-            $details = (Get-Content $StartupErrLog -Tail 30 -ErrorAction SilentlyContinue) -join "`n"
+        if (Test-Path -LiteralPath $StartupErrLog) {
+            $details = @(Get-Content -LiteralPath $StartupErrLog -Tail 30 -ErrorAction SilentlyContinue) -join "`n"
         }
         throw "后台启动任务立即退出。`n$details"
     }
 
-    Write-Host "START 已提交后台启动任务，PID=$($process.Id)。当前终端可以继续使用。" -ForegroundColor Green
-    Write-Host "STATUS .\status.ps1" -ForegroundColor Cyan
+    Write-Host "START 已提交后台启动任务，PID=$($startup.Id)。当前终端可以继续使用。" -ForegroundColor Green
+    Write-Host 'STATUS .\status.ps1' -ForegroundColor Cyan
     Write-Host "LOG    Get-Content '$StartupOutLog' -Wait" -ForegroundColor Cyan
     Write-Host "ERROR  Get-Content '$StartupErrLog' -Wait" -ForegroundColor Cyan
 }
 
-function Invoke-StartWorker {
-    Set-Location $ProjectRoot
-
-    if ($null -ne (Get-TrackedProcess -PidFile $BackendPidFile)) {
-        throw '后端已在运行。先运行 .\stop.ps1。'
-    }
-    if ($null -ne (Get-TrackedProcess -PidFile $FrontendPidFile)) {
-        throw '前端已在运行。先运行 .\stop.ps1。'
-    }
-    Assert-PortsAvailable
-
-    $BackendPort | Set-Content $BackendPortFile -NoNewline
-    $FrontendPort | Set-Content $FrontendPortFile -NoNewline
-
-    $pythonLauncher = 'py'
-    try {
-        $python = (& $pythonLauncher -3.12 -c "import sys; print(sys.executable)" 2>$null |
-            Select-Object -Last 1).Trim()
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $python)) {
-            throw 'Python 3.12 unavailable'
-        }
-    } catch {
+function Resolve-Python312 {
+    $pythonOutput = & py.exe -3.12 -c "import sys; print(sys.executable)" 2>$null
+    if ($LASTEXITCODE -ne 0) {
         throw '未找到 py (Python 3.12)。请安装 Python 3.12 并加入 PATH。'
     }
 
+    $python = (@($pythonOutput) | Select-Object -Last 1).Trim()
+    if ([string]::IsNullOrWhiteSpace($python)) {
+        throw '无法解析 Python 3.12 可执行文件路径。'
+    }
+    if (-not (Test-Path -LiteralPath $python)) {
+        throw "Python 3.12 可执行文件不存在：$python"
+    }
+
+    return $python
+}
+
+function Start-Backend {
+    param([string]$Python)
+
     $backendDir = Join-Path $ProjectRoot 'backend'
     Set-Location $backendDir
-    & $python -c "import fastapi, uvicorn, app" 2>$null
-    $backendDepsReady = $LASTEXITCODE -eq 0
-    if (-not $backendDepsReady -and $SkipInstall) {
+
+    & $Python -c "import fastapi, uvicorn, app" 2>$null
+    $dependenciesReady = ($LASTEXITCODE -eq 0)
+    if ((-not $dependenciesReady) -and $SkipInstall) {
         throw '后端依赖缺失，不能与 -SkipInstall 同时使用。'
     }
-    if (-not $backendDepsReady) {
+    if (-not $dependenciesReady) {
         Write-Host 'SETUP 安装后端依赖...' -ForegroundColor Cyan
-        & $python -m pip install -e '.[dev]'
-        if ($LASTEXITCODE -ne 0) { throw '后端依赖安装失败。' }
+        & $Python -m pip install -e '.[dev]'
+        if ($LASTEXITCODE -ne 0) {
+            throw '后端依赖安装失败。'
+        }
     }
 
     $keyFile = Join-Path (Split-Path $ProjectRoot -Parent) 'deepseek-apikey'
     $previousKey = $env:DEEPSEEK_API_KEY
     $hadPreviousKey = Test-Path Env:DEEPSEEK_API_KEY
+
     if (-not $Mock) {
         if (-not (Test-Path -LiteralPath $keyFile)) {
             throw '未找到 DeepSeek key 文件。使用 -Mock 可只启动设计模式。'
         }
-        $env:DEEPSEEK_API_KEY = [IO.File]::ReadAllText(
-            (Resolve-Path -LiteralPath $keyFile)
-        ).Trim()
+        $resolvedKeyFile = Resolve-Path -LiteralPath $keyFile
+        $env:DEEPSEEK_API_KEY = [IO.File]::ReadAllText($resolvedKeyFile).Trim()
         if ([string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY)) {
             throw 'DeepSeek key 文件为空。'
         }
+
         $ragDb = Join-Path $ProjectRoot 'data\bazi_rag_dataset_v2_1\import\sqlite\bazi_rag.sqlite'
         if (-not (Test-Path -LiteralPath $ragDb)) {
             throw "正式 RAG SQLite 数据不存在：$ragDb"
@@ -231,100 +261,131 @@ function Invoke-StartWorker {
 
     Write-Host "START 后端 uvicorn (port $BackendPort)..." -ForegroundColor Green
     try {
-        $backendProc = Start-Process -FilePath $python -ArgumentList @(
+        $quotedBackendDir = '"{0}"' -f $backendDir
+        $arguments = @(
             '-m', 'uvicorn', 'app.main:app',
-            '--app-dir', ('"{0}"' -f $backendDir),
+            '--app-dir', $quotedBackendDir,
             '--host', '127.0.0.1',
-            '--port', "$BackendPort",
+            '--port', [string]$BackendPort,
             '--log-level', 'info'
-        ) -WorkingDirectory $backendDir `
-            -RedirectStandardOutput $BackendLog `
-            -RedirectStandardError $BackendErr `
-            -PassThru -WindowStyle Hidden
+        )
+        $process = Start-Process -FilePath $Python -ArgumentList $arguments -WorkingDirectory $backendDir -RedirectStandardOutput $BackendLog -RedirectStandardError $BackendErr -WindowStyle Hidden -PassThru
     } finally {
-        if ($hadPreviousKey) { $env:DEEPSEEK_API_KEY = $previousKey }
-        else { Remove-Item Env:DEEPSEEK_API_KEY -ErrorAction SilentlyContinue }
+        if ($hadPreviousKey) {
+            $env:DEEPSEEK_API_KEY = $previousKey
+        } else {
+            Remove-Item Env:DEEPSEEK_API_KEY -ErrorAction SilentlyContinue
+        }
     }
 
-    $backendProc.Id | Set-Content $BackendPidFile -NoNewline
-    $backendProc.StartTime.ToUniversalTime().Ticks | Set-Content $BackendStartFile -NoNewline
+    $process.Id | Set-Content -LiteralPath $BackendPidFile -NoNewline
+    $process.StartTime.ToUniversalTime().Ticks | Set-Content -LiteralPath $BackendStartFile -NoNewline
+    return $process
+}
 
+function Start-Frontend {
     $frontendDir = Join-Path $ProjectRoot 'frontend'
     Set-Location $frontendDir
-    if (-not (Get-Command node.exe -ErrorAction SilentlyContinue) -or
-        -not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
+
+    $nodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue
+    $npmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue
+    if (($null -eq $nodeCommand) -or ($null -eq $npmCommand)) {
         throw '未找到 Node.js/npm。'
     }
-    if (-not (Test-Path 'node_modules\vite\bin\vite.js')) {
+
+    $viteScript = Join-Path $frontendDir 'node_modules\vite\bin\vite.js'
+    if (-not (Test-Path -LiteralPath $viteScript)) {
         if ($SkipInstall) {
             throw '前端依赖缺失，不能与 -SkipInstall 同时使用。'
         }
         Write-Host 'SETUP 安装前端依赖 (npm install)...' -ForegroundColor Cyan
         & npm.cmd install --prefer-offline --no-audit --no-fund --no-progress
-        if ($LASTEXITCODE -ne 0) { throw '前端依赖安装失败。' }
+        if ($LASTEXITCODE -ne 0) {
+            throw '前端依赖安装失败。'
+        }
     }
 
     $previousMock = $env:VITE_USE_MOCKS
     $hadPreviousMock = Test-Path Env:VITE_USE_MOCKS
     $previousTarget = $env:VITE_API_TARGET
     $hadPreviousTarget = Test-Path Env:VITE_API_TARGET
-    if ($Mock) { $env:VITE_USE_MOCKS = 'true' }
-    else { Remove-Item Env:VITE_USE_MOCKS -ErrorAction SilentlyContinue }
+
+    if ($Mock) {
+        $env:VITE_USE_MOCKS = 'true'
+    } else {
+        Remove-Item Env:VITE_USE_MOCKS -ErrorAction SilentlyContinue
+    }
     $env:VITE_API_TARGET = "http://127.0.0.1:$BackendPort"
 
     Write-Host "START 前端 vite dev (port $FrontendPort)..." -ForegroundColor Green
     try {
-        $node = (Get-Command node.exe).Source
-        $viteScript = Join-Path $frontendDir 'node_modules\vite\bin\vite.js'
-        $frontendProc = Start-Process -FilePath $node -ArgumentList @(
-            ('"{0}"' -f $viteScript),
+        $quotedViteScript = '"{0}"' -f $viteScript
+        $arguments = @(
+            $quotedViteScript,
             '--host', '127.0.0.1',
-            '--port', "$FrontendPort"
-        ) -WorkingDirectory $frontendDir `
-            -RedirectStandardOutput $FrontendLog `
-            -RedirectStandardError $FrontendErr `
-            -PassThru -WindowStyle Hidden
+            '--port', [string]$FrontendPort
+        )
+        $process = Start-Process -FilePath $nodeCommand.Source -ArgumentList $arguments -WorkingDirectory $frontendDir -RedirectStandardOutput $FrontendLog -RedirectStandardError $FrontendErr -WindowStyle Hidden -PassThru
     } finally {
-        if ($hadPreviousMock) { $env:VITE_USE_MOCKS = $previousMock }
-        else { Remove-Item Env:VITE_USE_MOCKS -ErrorAction SilentlyContinue }
-        if ($hadPreviousTarget) { $env:VITE_API_TARGET = $previousTarget }
-        else { Remove-Item Env:VITE_API_TARGET -ErrorAction SilentlyContinue }
+        if ($hadPreviousMock) {
+            $env:VITE_USE_MOCKS = $previousMock
+        } else {
+            Remove-Item Env:VITE_USE_MOCKS -ErrorAction SilentlyContinue
+        }
+        if ($hadPreviousTarget) {
+            $env:VITE_API_TARGET = $previousTarget
+        } else {
+            Remove-Item Env:VITE_API_TARGET -ErrorAction SilentlyContinue
+        }
     }
 
-    $frontendProc.Id | Set-Content $FrontendPidFile -NoNewline
-    $frontendProc.StartTime.ToUniversalTime().Ticks | Set-Content $FrontendStartFile -NoNewline
+    $process.Id | Set-Content -LiteralPath $FrontendPidFile -NoNewline
+    $process.StartTime.ToUniversalTime().Ticks | Set-Content -LiteralPath $FrontendStartFile -NoNewline
+    return $process
+}
+
+function Invoke-StartWorker {
+    Set-Location $ProjectRoot
+
+    $backendProcess = Get-TrackedProcess -PidFile $BackendPidFile
+    $frontendProcess = Get-TrackedProcess -PidFile $FrontendPidFile
+    if ($null -ne $backendProcess) {
+        throw '后端已在运行。先运行 .\stop.ps1。'
+    }
+    if ($null -ne $frontendProcess) {
+        throw '前端已在运行。先运行 .\stop.ps1。'
+    }
+
+    Assert-PortsAvailable
+    $BackendPort | Set-Content -LiteralPath $BackendPortFile -NoNewline
+    $FrontendPort | Set-Content -LiteralPath $FrontendPortFile -NoNewline
+
+    $python = Resolve-Python312
+    $backend = Start-Backend -Python $python
+    $frontend = Start-Frontend
 
     Write-Host 'HEALTH 等待后端服务就绪...' -ForegroundColor Cyan
-    $backendOk = Wait-HttpReady `
-        -Uri "http://127.0.0.1:$BackendPort/api/v1/health" `
-        -TimeoutSeconds 20 `
-        -Description '后端'
-    if (-not $backendOk) {
+    $backendReady = Wait-HttpReady -Uri "http://127.0.0.1:$BackendPort/api/v1/health" -TimeoutSeconds 20 -Description '后端'
+    if (-not $backendReady) {
         throw "后端未就绪。日志：$BackendLog / $BackendErr"
     }
 
-    Write-Host 'HEALTH 等待前端与 API 代理就绪...' -ForegroundColor Cyan
-    $frontendPageOk = Wait-HttpReady `
-        -Uri "http://127.0.0.1:$FrontendPort/" `
-        -TimeoutSeconds 20 `
-        -Description '前端页面'
-    $frontendProxyOk = Wait-HttpReady `
-        -Uri "http://127.0.0.1:$FrontendPort/api/v1/health" `
-        -TimeoutSeconds 10 `
-        -Description '前端 API 代理'
-    if (-not $frontendPageOk -or -not $frontendProxyOk) {
+    Write-Host 'HEALTH 等待前端和 API 代理就绪...' -ForegroundColor Cyan
+    $frontendReady = Wait-HttpReady -Uri "http://127.0.0.1:$FrontendPort/" -TimeoutSeconds 20 -Description '前端页面'
+    $proxyReady = Wait-HttpReady -Uri "http://127.0.0.1:$FrontendPort/api/v1/health" -TimeoutSeconds 10 -Description '前端 API 代理'
+    if ((-not $frontendReady) -or (-not $proxyReady)) {
         throw "前端或 API 代理未就绪。日志：$FrontendLog / $FrontendErr"
     }
 
-    Write-Host "OK 后端 http://127.0.0.1:$BackendPort (pid $($backendProc.Id))" -ForegroundColor Green
-    Write-Host "OK 前端 http://127.0.0.1:$FrontendPort (pid $($frontendProc.Id))" -ForegroundColor Green
+    Write-Host "OK    后端 http://127.0.0.1:$BackendPort (pid $($backend.Id))" -ForegroundColor Green
+    Write-Host "OK    前端 http://127.0.0.1:$FrontendPort (pid $($frontend.Id))" -ForegroundColor Green
     Write-Host '停止：.\stop.ps1' -ForegroundColor Cyan
 }
 
-if (-not $Worker -and -not $Wait) {
+if ((-not $Worker) -and (-not $Wait)) {
     try {
         Start-DetachedWorker
-        return
+        exit 0
     } catch {
         Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
         exit 1
@@ -338,14 +399,12 @@ try {
     $exitCode = 1
     Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
     try {
-        & (Join-Path $ProjectRoot 'stop.ps1') `
-            -Force `
-            -BackendPort $BackendPort `
-            -FrontendPort $FrontendPort
-    } catch { }
+        & (Join-Path $ProjectRoot 'stop.ps1') -Force -BackendPort $BackendPort -FrontendPort $FrontendPort
+    } catch {
+    }
 } finally {
     if ($Worker) {
-        Remove-Item $StartupPidFile -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $StartupPidFile -Force -ErrorAction SilentlyContinue
     }
     Set-Location $ProjectRoot
 }
