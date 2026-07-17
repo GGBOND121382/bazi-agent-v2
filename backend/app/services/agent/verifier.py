@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from typing import Any, cast
 
 from ...api.dto import ChartResultDTO, FactDTO, StructuredAnalysisDTO, ValidationResultDTO
@@ -37,6 +37,39 @@ def _deterministic_shensha(chart: ChartResultDTO) -> tuple[dict[str, Any], ...]:
     return tuple(cast(dict[str, Any], item) for item in raw if isinstance(item, dict))
 
 
+def _walk_dicts(value: object) -> Iterator[dict[str, Any]]:
+    """Yield dictionaries recursively from deterministic temporal payloads."""
+    if isinstance(value, dict):
+        item = cast(dict[str, Any], value)
+        yield item
+        for child in item.values():
+            yield from _walk_dicts(child)
+    elif isinstance(value, list | tuple):
+        for child in value:
+            yield from _walk_dicts(child)
+
+
+def _deterministic_temporal_items(chart: ChartResultDTO) -> tuple[dict[str, Any], ...]:
+    """Return model-visible qiyun/dayun/precomputed temporal records.
+
+    Any record carrying a fact_id or rule_id is part of the immutable deterministic
+    context and must be recognized by the validator exactly as it is recognized by
+    the interpretation model.
+    """
+    seen: set[int] = set()
+    items: list[dict[str, Any]] = []
+    for root in (chart.qiyun, chart.dayun, chart.temporal_context):
+        for item in _walk_dicts(root):
+            if not item.get("fact_id") and not item.get("rule_id"):
+                continue
+            identity = id(item)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            items.append(item)
+    return tuple(items)
+
+
 def _referenced_text(
     *,
     fact_ids: Iterable[str],
@@ -44,6 +77,8 @@ def _referenced_text(
     evidence_ids: Iterable[str],
     fact_index: dict[str, FactDTO],
     relation_fact_index: dict[str, dict[str, Any]],
+    temporal_fact_index: dict[str, dict[str, Any]],
+    temporal_rule_index: dict[str, list[dict[str, Any]]],
     shensha_rule_index: dict[str, list[dict[str, Any]]],
     evidence_index: dict[str, RetrievedEvidence],
 ) -> str:
@@ -56,6 +91,16 @@ def _referenced_text(
         json.dumps(relation_fact_index[fact_id], ensure_ascii=False, default=str)
         for fact_id in fact_ids
         if fact_id in relation_fact_index
+    )
+    parts.extend(
+        json.dumps(temporal_fact_index[fact_id], ensure_ascii=False, default=str)
+        for fact_id in fact_ids
+        if fact_id in temporal_fact_index
+    )
+    parts.extend(
+        json.dumps(item, ensure_ascii=False, default=str)
+        for rule_id in rule_ids
+        for item in temporal_rule_index.get(rule_id, [])
     )
     parts.extend(
         json.dumps(item, ensure_ascii=False, default=str)
@@ -80,11 +125,22 @@ def verify_analysis(
 ) -> ValidationResultDTO:
     relation_items = tuple(computed_relations)
     shensha_items = _deterministic_shensha(chart)
+    temporal_items = _deterministic_temporal_items(chart)
+
     shensha_rule_index: dict[str, list[dict[str, Any]]] = {}
     for item in shensha_items:
         rule_id = str(item.get("rule_id", ""))
         if rule_id:
             shensha_rule_index.setdefault(rule_id, []).append(item)
+
+    temporal_fact_index = {
+        str(item["fact_id"]): item for item in temporal_items if item.get("fact_id")
+    }
+    temporal_rule_index: dict[str, list[dict[str, Any]]] = {}
+    for item in temporal_items:
+        rule_id = str(item.get("rule_id", ""))
+        if rule_id:
+            temporal_rule_index.setdefault(rule_id, []).append(item)
 
     fact_index = {fact.fact_id: fact for fact in chart.facts}
     relation_fact_index = {
@@ -94,6 +150,7 @@ def verify_analysis(
     chart_rules = (
         {fact.rule_id for fact in chart.facts}
         | {str(item["rule_id"]) for item in relation_items if "rule_id" in item}
+        | set(temporal_rule_index)
         | set(shensha_rule_index)
     )
     known_rules = chart_rules | set(evidence_index)
@@ -102,6 +159,7 @@ def verify_analysis(
         for item in evidence_index.values()
         if item.can_support_claim and item.trust_tier in {"A", "B"}
     }
+    known_fact_ids = set(fact_index) | set(relation_fact_index) | set(temporal_fact_index)
     errors: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     approved: list[str] = []
@@ -115,7 +173,6 @@ def verify_analysis(
 
     for claim in analysis.claims:
         before = len(errors)
-        known_fact_ids = set(fact_index) | set(relation_fact_index)
         missing_facts = sorted(set(claim.fact_ids) - known_fact_ids)
         missing_rules = sorted(set(claim.rule_ids) - known_rules)
         non_authoritative_rules = sorted(set(claim.rule_ids) - authoritative_rules)
@@ -158,6 +215,8 @@ def verify_analysis(
             evidence_ids=claim.evidence_ids,
             fact_index=fact_index,
             relation_fact_index=relation_fact_index,
+            temporal_fact_index=temporal_fact_index,
+            temporal_rule_index=temporal_rule_index,
             shensha_rule_index=shensha_rule_index,
             evidence_index=evidence_index,
         )
