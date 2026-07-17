@@ -4,11 +4,13 @@ Given a birth request, produces a NormalizedTime. Handles:
 - IANA timezone resolution (zoneinfo)
 - DST ambiguous-time detection (PEP-495 fold)
 - DST nonexistent-time rejection
-- Optional true-solar-time adjustment
+- Local mean solar time from longitude
+- True solar time from longitude plus the equation of time
 """
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from math import cos, pi, sin
 from zoneinfo import ZoneInfo
 
 from ..domain.errors import (
@@ -31,11 +33,11 @@ def normalize(
     """Convert a local civil datetime + IANA timezone into NormalizedTime."""
     try:
         tz = ZoneInfo(timezone_name)
-    except Exception as e:
+    except Exception as exc:
         raise TimeError(
             f"unknown timezone: {timezone_name}",
             safe_details={"hint": "use IANA name like Asia/Shanghai"},
-        ) from e
+        ) from exc
 
     if profile.reject_naive_datetime and local_dt.tzinfo is None:
         raise TimeError("naive datetime rejected by profile")
@@ -63,15 +65,24 @@ def normalize(
     local_with_fold = local_aware.replace(fold=final_fold)
     utc = local_with_fold.astimezone(UTC)
 
-    lmst = _local_mean_solar_time(utc, longitude) if profile.time_basis.longitude_correction_enabled and longitude is not None else None
-    tst = lmst  # TODO: real equation-of-time + longitude correction
+    lmst: datetime | None = None
+    true_solar: datetime | None = None
+    if profile.time_basis.longitude_correction_enabled and longitude is not None:
+        lmst = _local_mean_solar_time(local_with_fold, longitude)
+        if profile.time_basis.true_solar_time_enabled:
+            correction = (
+                _equation_of_time_minutes(local_with_fold)
+                if profile.time_basis.equation_of_time_enabled
+                else 0.0
+            )
+            true_solar = lmst + timedelta(minutes=correction)
 
     return NormalizedTime(
         utc=utc,
         local_civil=local_with_fold,
         timezone=timezone_name,
         local_mean_solar=lmst,
-        true_solar=tst,
+        true_solar=true_solar,
         time_basis=profile.time_basis.default,
         fold=final_fold,
         nonexistent_resolved=nonexistent,
@@ -100,9 +111,46 @@ def _is_ambiguous(local_aware: datetime, tz: ZoneInfo, fold: int | None) -> tupl
     return True, (fold if fold is not None else 0)
 
 
-def _local_mean_solar_time(utc: datetime, longitude: float | None) -> datetime | None:
-    """LMST shifts UTC by 4 minutes per degree of longitude east of GMT."""
-    if longitude is None:
-        return None
-    delta = timedelta(minutes=longitude * 4.0)
-    return utc + delta
+def _local_mean_solar_time(local_aware: datetime, longitude: float) -> datetime:
+    """Shift civil wall time to the local longitude's mean solar time.
+
+    A civil UTC offset corresponds to a standard meridian of four minutes per
+    degree. Keeping the original timezone on the returned datetime makes the
+    corrected wall-clock value explicit in API responses and logs.
+    """
+    offset = local_aware.utcoffset()
+    if offset is None:
+        raise TimeError("local datetime has no UTC offset")
+    offset_minutes = offset.total_seconds() / 60.0
+    standard_meridian = offset_minutes / 4.0
+    longitude_minutes = 4.0 * (longitude - standard_meridian)
+    return local_aware + timedelta(minutes=longitude_minutes)
+
+
+def _equation_of_time_minutes(local_aware: datetime) -> float:
+    """Approximate the astronomical equation of time in minutes.
+
+    Uses the commonly published fractional-year approximation. Its precision is
+    more than sufficient for hour-branch boundary handling; the unrounded value
+    is retained so callers may present seconds rather than silently truncating.
+    """
+    day_of_year = local_aware.timetuple().tm_yday
+    days_in_year = 366 if _is_leap_year(local_aware.year) else 365
+    hour = (
+        local_aware.hour
+        + local_aware.minute / 60.0
+        + local_aware.second / 3600.0
+        + local_aware.microsecond / 3_600_000_000.0
+    )
+    gamma = 2.0 * pi / days_in_year * (day_of_year - 1 + (hour - 12.0) / 24.0)
+    return 229.18 * (
+        0.000075
+        + 0.001868 * cos(gamma)
+        - 0.032077 * sin(gamma)
+        - 0.014615 * cos(2.0 * gamma)
+        - 0.040849 * sin(2.0 * gamma)
+    )
+
+
+def _is_leap_year(year: int) -> bool:
+    return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
