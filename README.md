@@ -59,15 +59,17 @@ npm run dev
 
 ```text
 用户名：admin
-密码：123456
+密码：wsxqaz@123
 ```
 
 本地配置文件为仓库根目录的 `config.local.env`：
 
 ```env
 INITIAL_ADMIN_USERNAME=admin
-INITIAL_ADMIN_PASSWORD=123456
+INITIAL_ADMIN_PASSWORD=wsxqaz@123
 DEFAULT_USER_PASSWORD=123456
+INITIAL_DEMO_USERNAME=user123
+INITIAL_DEMO_PASSWORD=123456
 BAZI_RUNTIME_DIR=runtime
 ENABLE_REPORT_SHARING=false
 
@@ -81,7 +83,7 @@ DEEPSEEK_MAX_TOKENS=65536
 DEEPSEEK_MAX_TRANSPORT_ATTEMPTS=2
 ```
 
-管理员可进入 `/admin` 创建普通用户、重置密码，并查看用户的排盘和对话记录。新用户默认密码取 `DEFAULT_USER_PASSWORD`。密码在 SQLite 中以 PBKDF2 哈希保存。
+用户可自行注册并设置密码，注册后由管理员在 `/admin` 审批。管理员可创建用户、重置密码，并查看全部用户的命盘、报告和对话记录。普通用户只能访问自己的数据。密码在 SQLite 中以 PBKDF2 哈希保存。
 
 > `INITIAL_ADMIN_PASSWORD` 只在数据库中尚无该管理员时生效。若数据库已经初始化，请在后台重置密码，或删除玩具环境的运行数据库重新初始化。
 

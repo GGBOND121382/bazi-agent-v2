@@ -370,7 +370,9 @@ export type CurrentUserDTO = {
   username: string
   role: 'admin' | 'user'
   enabled: boolean
+  approval_status: 'pending' | 'approved' | 'rejected'
   must_change_password: boolean
+  created_at: string
 }
 
 export type ChatThreadSummaryDTO = {

@@ -75,8 +75,15 @@ def initialize(path: Path | None = None) -> None:
                     password_hash TEXT NOT NULL,
                     role TEXT NOT NULL DEFAULT 'user',
                     enabled INTEGER NOT NULL DEFAULT 1,
+                    approval_status TEXT NOT NULL DEFAULT 'approved',
+                    approved_at TEXT,
+                    approved_by TEXT,
                     must_change_password INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS user_preferences (
+                    user_id TEXT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
+                    preference_json TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS sessions (
                     token_hash TEXT PRIMARY KEY,
@@ -163,6 +170,13 @@ def initialize(path: Path | None = None) -> None:
                 CREATE INDEX IF NOT EXISTS idx_llm_chart ON llm_calls(chart_id, created_at);
                 """
             )
+            user_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+            if "approval_status" not in user_columns:
+                conn.execute("ALTER TABLE users ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'approved'")
+            if "approved_at" not in user_columns:
+                conn.execute("ALTER TABLE users ADD COLUMN approved_at TEXT")
+            if "approved_by" not in user_columns:
+                conn.execute("ALTER TABLE users ADD COLUMN approved_by TEXT")
             conn.commit()
         finally:
             conn.close()

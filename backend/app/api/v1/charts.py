@@ -65,7 +65,7 @@ def create_chart(
             safe_details={"errors": e.errors(include_url=False)},
         ) from e
     dto, _chart_id, _created = svc.create_chart(
-        request=br, idempotency_key=idempotency_key, owner_id=user.user_id
+        request=br, idempotency_key=f"{user.user_id}:{idempotency_key}", owner_id=user.user_id
     )
     return dto
 

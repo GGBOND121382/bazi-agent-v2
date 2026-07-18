@@ -9,6 +9,7 @@ import AnalysisProgressPage from '@/pages/AnalysisProgressPage.vue'
 import HistoryPage from '@/pages/HistoryPage.vue'
 import SettingsPage from '@/pages/SettingsPage.vue'
 import LoginPage from '@/pages/LoginPage.vue'
+import RegisterPage from '@/pages/RegisterPage.vue'
 import AdminPage from '@/pages/AdminPage.vue'
 import { useBaziClient } from '@/api'
 
@@ -16,6 +17,7 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', name: 'login', component: LoginPage, meta: { title: '登录', public: true } },
+    { path: '/register', name: 'register', component: RegisterPage, meta: { title: '注册', public: true } },
     { path: '/admin', name: 'admin', component: AdminPage, meta: { title: '系统后台', admin: true } },
     { path: '/', name: 'home', component: LandingPage, meta: { title: '首页排盘' } },
     { path: '/charts/new', name: 'chart-new', component: ChartNewWizard, meta: { title: '新建命盘' } },

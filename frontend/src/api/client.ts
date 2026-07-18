@@ -65,7 +65,14 @@ export class BaziClient {
     if (!response.ok) {
       let detail: ApiErrorDTO
       try {
-        detail = (await response.json()) as ApiErrorDTO
+        const payload = await response.json() as ApiErrorDTO & { detail?: string }
+        detail = payload.error_code ? payload : {
+          schema_version: 'api-error-v1',
+          request_id: 'req_unknown',
+          error_code: response.status === 403 ? 'FORBIDDEN' : 'INVALID_INPUT',
+          message_key: payload.detail ?? 'request.failed',
+          retryable: false,
+        }
       } catch {
         detail = {
           schema_version: 'api-error-v1',
@@ -82,6 +89,10 @@ export class BaziClient {
   }
 
 
+  register(username: string, password: string): Promise<CurrentUserDTO> {
+    return this.request<CurrentUserDTO>('POST', '/v1/auth/register', { username, password })
+  }
+
   login(username: string, password: string): Promise<CurrentUserDTO> {
     return this.request<CurrentUserDTO>('POST', '/v1/auth/login', { username, password })
   }
@@ -94,23 +105,34 @@ export class BaziClient {
     return this.request<CurrentUserDTO>('GET', '/v1/auth/me')
   }
 
-  changePassword(password: string): Promise<void> {
-    return this.request<void>('POST', '/v1/auth/change-password', { password })
+  changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    return this.request<void>('POST', '/v1/auth/change-password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    })
   }
 
   listUsers(): Promise<CurrentUserDTO[]> {
     return this.request<CurrentUserDTO[]>('GET', '/v1/admin/users')
   }
 
-  createUser(username: string, password?: string): Promise<CurrentUserDTO> {
-    return this.request<CurrentUserDTO>('POST', '/v1/admin/users', { username, ...(password ? { password } : {}) })
+  createUser(username: string, password: string): Promise<CurrentUserDTO> {
+    return this.request<CurrentUserDTO>('POST', '/v1/admin/users', { username, password })
+  }
+
+  approveUser(userId: string): Promise<CurrentUserDTO> {
+    return this.request<CurrentUserDTO>('POST', `/v1/admin/users/${encodeURIComponent(userId)}/approve`)
+  }
+
+  rejectUser(userId: string): Promise<CurrentUserDTO> {
+    return this.request<CurrentUserDTO>('POST', `/v1/admin/users/${encodeURIComponent(userId)}/reject`)
   }
 
   resetUserPassword(userId: string, password?: string): Promise<void> {
     return this.request<void>('POST', `/v1/admin/users/${encodeURIComponent(userId)}/reset-password`, password ? { password } : {})
   }
 
-  getAdminUserData(userId: string): Promise<{ charts: HistoryDTO['charts']; threads: ChatThreadSummaryDTO[] }> {
+  getAdminUserData(userId: string): Promise<{ charts: HistoryDTO['charts']; reports: HistoryDTO['reports']; threads: ChatThreadSummaryDTO[] }> {
     return this.request('GET', `/v1/admin/users/${encodeURIComponent(userId)}/data`)
   }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useBaziClient } from '@/api'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -9,12 +9,15 @@ const client = useBaziClient()
 const pageTitle = computed(() => String(route.meta.title ?? '问真八字'))
 const chartId = computed(() => typeof route.params.chartId === 'string' ? route.params.chartId : null)
 const temporalTarget = computed(() => chartId.value ? `/charts/${chartId.value}/temporal` : '/history')
-const showBack = computed(() => route.name !== 'home' && route.name !== 'login')
-const showChrome = computed(() => route.name !== 'login')
-const currentUser = computed(() => {
-  try { return JSON.parse(sessionStorage.getItem('bazi:current-user') ?? 'null') as { role?: string; username?: string } | null }
-  catch { return null }
-})
+const showBack = computed(() => route.name !== 'home' && route.name !== 'login' && route.name !== 'register')
+const showChrome = computed(() => route.name !== 'login' && route.name !== 'register')
+const currentUser = ref<{ role?: string; username?: string } | null>(null)
+
+function refreshCurrentUser() {
+  try { currentUser.value = JSON.parse(sessionStorage.getItem('bazi:current-user') ?? 'null') }
+  catch { currentUser.value = null }
+}
+watch(() => route.fullPath, refreshCurrentUser, { immediate: true })
 
 async function logout() {
   try { await client.logout() } catch { /* browser cookie is cleared by route reset below */ }

@@ -5,6 +5,7 @@ import os
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
+
 from fastapi import APIRouter, Depends, Header, status
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -36,9 +37,21 @@ class PreferencesPatch(BaseModel):
     reduce_motion: bool | None = None
 
 
-_preferences = UserPreferencesDTO(
+_DEFAULT_PREFERENCES = UserPreferencesDTO(
     language="zh-CN", detail_level="concise", theme="system", reduce_motion=False
 )
+
+
+def _authorize_report(report_id: str, user: CurrentUser) -> None:
+    from ...persistence import connect
+    with connect() as conn:
+        row = conn.execute(
+            """SELECT c.owner_id FROM reports r JOIN charts c ON c.chart_id=r.chart_id
+            WHERE r.report_id=?""",
+            (report_id,),
+        ).fetchone()
+    if row is None or (not user.is_admin and str(row["owner_id"]) != user.user_id):
+        raise InvalidInputError("report not found")
 
 
 def _jobs() -> AnalysisJobService:
@@ -96,7 +109,9 @@ def create_export(
     report_id: str,
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
     jobs: AnalysisJobService = Depends(_jobs),
+    user: CurrentUser = Depends(require_user),
 ) -> dict[str, str]:
+    _authorize_report(report_id, user)
     if jobs.store.get_report(report_id) is None:
         raise InvalidInputError("report not found")
     return {
@@ -108,8 +123,12 @@ def create_export(
 
 @router.post("/reports/{report_id}/shares", status_code=status.HTTP_201_CREATED)
 def create_share(
-    report_id: str, request: ShareRequest, jobs: AnalysisJobService = Depends(_jobs)
+    report_id: str,
+    request: ShareRequest,
+    jobs: AnalysisJobService = Depends(_jobs),
+    user: CurrentUser = Depends(require_user),
 ) -> dict[str, Any]:
+    _authorize_report(report_id, user)
     if os.environ.get("ENABLE_REPORT_SHARING", "false").casefold() != "true":
         raise InvalidInputError("report sharing is disabled")
     expires_at = datetime.now(UTC) + timedelta(hours=request.expires_in_hours)
@@ -125,7 +144,15 @@ def create_share(
 
 
 @router.delete("/shares/{share_id}", status_code=status.HTTP_204_NO_CONTENT)
-def revoke_share(share_id: str, jobs: AnalysisJobService = Depends(_jobs)) -> None:
+def revoke_share(
+    share_id: str,
+    jobs: AnalysisJobService = Depends(_jobs),
+    user: CurrentUser = Depends(require_user),
+) -> None:
+    record = jobs.store.get_share(share_id)
+    if record is None:
+        raise InvalidInputError("share not found")
+    _authorize_report(record.report_id, user)
     try:
         jobs.store.revoke_share(share_id)
     except JobStateError as exc:
@@ -133,24 +160,41 @@ def revoke_share(share_id: str, jobs: AnalysisJobService = Depends(_jobs)) -> No
 
 
 @router.get("/settings/profile", response_model=UserPreferencesDTO)
-def get_preferences() -> UserPreferencesDTO:
-    return _preferences
+def get_preferences(user: CurrentUser = Depends(require_user)) -> UserPreferencesDTO:
+    from ...persistence import connect
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT preference_json FROM user_preferences WHERE user_id=?",
+            (user.user_id,),
+        ).fetchone()
+    if row is None:
+        return _DEFAULT_PREFERENCES
+    return UserPreferencesDTO.model_validate_json(str(row["preference_json"]))
 
 
 @router.patch("/settings/profile", response_model=UserPreferencesDTO)
-def update_preferences(request: PreferencesPatch) -> UserPreferencesDTO:
-    global _preferences
-    current = _preferences.model_dump()
+def update_preferences(
+    request: PreferencesPatch, user: CurrentUser = Depends(require_user)
+) -> UserPreferencesDTO:
+    from ...persistence import connect
+    current = get_preferences(user).model_dump()
     current.update(request.model_dump(exclude_none=True))
     try:
-        _preferences = UserPreferencesDTO.model_validate(current)
+        updated = UserPreferencesDTO.model_validate(current)
     except ValueError as exc:
         raise InvalidInputError("invalid preference value") from exc
-    return _preferences
+    with connect() as conn:
+        conn.execute(
+            """INSERT INTO user_preferences(user_id, preference_json) VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET preference_json=excluded.preference_json""",
+            (user.user_id, updated.model_dump_json()),
+        )
+    return updated
 
 
 @router.get("/settings/configuration")
-def get_configuration() -> dict[str, Any]:
+def get_configuration(user: CurrentUser = Depends(require_user)) -> dict[str, Any]:
+    del user
     profile = load_profile()
     return {
         "calculation_profile_id": profile.profile_id,

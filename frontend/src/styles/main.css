@@ -374,3 +374,26 @@ code { font-size: .75rem; overflow-wrap: anywhere; color: #695c45; }
 
 .relation-chip-rich { align-items: flex-start; flex-direction: column; vertical-align: top; max-width: min(100%, 440px); }
 .relation-chip-rich small { color: #8b7a55; line-height: 1.45; white-space: normal; }
+
+/* Approval-based account portal */
+.login-intro, .muted-copy { color: var(--muted-color, #6f675d); line-height: 1.7; }
+.auth-secondary-link { display: block; margin-top: .9rem; text-align: center; color: var(--accent-color, #8b2f2f); font-weight: 650; }
+.auth-button-link { display: block; text-align: center; text-decoration: none; }
+.registration-success { text-align: center; }
+.admin-section, .settings-card { padding: 1rem; display: grid; gap: .85rem; }
+.section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.section-title-row h2, .admin-create h2, .settings-card h2 { margin: .15rem 0 0; }
+.count-badge { min-width: 2rem; height: 2rem; border-radius: 999px; display: inline-grid; place-items: center; background: rgba(139,47,47,.1); color: var(--accent-color, #8b2f2f); font-weight: 750; }
+.approve-button { background: #2f6e4f; color: white; }
+.ghost-button { background: transparent; border: 1px solid var(--line-color, #ddd); color: inherit; }
+.admin-data-counts { display: flex; flex-wrap: wrap; gap: .6rem; }
+.admin-data-counts span { padding: .45rem .7rem; border-radius: 999px; background: rgba(0,0,0,.05); }
+.settings-page { display: grid; gap: 1rem; }
+.settings-card label, .password-form label { display: grid; gap: .4rem; }
+.settings-card input, .settings-card select { width: 100%; padding: .75rem; border: 1px solid var(--line-color, #ddd); border-radius: .7rem; background: var(--surface, #fff); }
+.success-copy { color: #2f6e4f; font-weight: 650; }
+@media (max-width: 680px) {
+  .admin-create { display: grid; }
+  .admin-user-list article { align-items: stretch; flex-wrap: wrap; }
+  .admin-user-list article div { width: 100%; }
+}

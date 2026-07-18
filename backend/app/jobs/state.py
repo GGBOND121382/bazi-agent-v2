@@ -211,6 +211,9 @@ class InMemoryAnalysisStore:
             self._shares[record.share_id] = record
             return record, token
 
+    def get_share(self, share_id: str) -> ShareRecord | None:
+        return self._shares.get(share_id)
+
     def revoke_share(self, share_id: str) -> ShareRecord:
         with self._lock:
             record = self._shares.get(share_id)

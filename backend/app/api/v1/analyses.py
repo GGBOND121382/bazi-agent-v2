@@ -62,6 +62,15 @@ def _authorize_chart(chart_id: str, user: CurrentUser, chart_service: Any) -> No
         raise HTTPException(status_code=403, detail="chart belongs to another user")
 
 
+
+
+def _authorize_job(job_id: str, user: CurrentUser, service: AnalysisJobService) -> None:
+    try:
+        job = service.require(job_id)
+    except JobStateError as exc:
+        raise InvalidInputError("job not found") from exc
+    _authorize_chart(job.chart_id, user, service.chart_service)
+
 def _authorize_report(report_id: str, user: CurrentUser) -> None:
     if user.user_id == "anonymous":
         return
@@ -91,7 +100,7 @@ def start_analysis(
             chart_id=chart_id,
             user_focus=tuple(request.user_focus),
             school=request.school,
-            idempotency_key=idempotency_key,
+            idempotency_key=f"{user.user_id}:{idempotency_key}",
         )
     except JobStateError as exc:
         raise InvalidInputError(str(exc)) from exc
@@ -130,8 +139,11 @@ def chat_about_chart(
 
 @router.get("/jobs/{job_id}")
 def get_job(
-    job_id: str, service: AnalysisJobService = Depends(_analysis_service)
+    job_id: str,
+    service: AnalysisJobService = Depends(_analysis_service),
+    user: CurrentUser = Depends(require_user),
 ) -> dict[str, object]:
+    _authorize_job(job_id, user, service)
     try:
         return service.require(job_id).public_dict()
     except JobStateError as exc:
@@ -144,8 +156,10 @@ def stream_job_events(
     last_event_id_header: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
     last_event_id_query: str | None = Query(default=None, alias="last_event_id"),
     service: AnalysisJobService = Depends(_analysis_service),
+    user: CurrentUser = Depends(require_user),
 ) -> StreamingResponse:
     last_event_id = last_event_id_header or last_event_id_query
+    _authorize_job(job_id, user, service)
     try:
         service.require(job_id)
     except JobStateError as exc:
@@ -181,8 +195,11 @@ def stream_job_events(
 
 @router.post("/jobs/{job_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
 def cancel_job(
-    job_id: str, service: AnalysisJobService = Depends(_analysis_service)
+    job_id: str,
+    service: AnalysisJobService = Depends(_analysis_service),
+    user: CurrentUser = Depends(require_user),
 ) -> dict[str, object]:
+    _authorize_job(job_id, user, service)
     try:
         return service.cancel(job_id).public_dict()
     except JobStateError as exc:
@@ -191,11 +208,14 @@ def cancel_job(
 
 @router.get("/analyses/{analysis_id}", response_model=StructuredAnalysisDTO)
 def get_analysis(
-    analysis_id: str, service: AnalysisJobService = Depends(_analysis_service)
+    analysis_id: str,
+    service: AnalysisJobService = Depends(_analysis_service),
+    user: CurrentUser = Depends(require_user),
 ) -> StructuredAnalysisDTO:
     analysis = service.store.get_analysis(analysis_id)
     if analysis is None:
         raise InvalidInputError("analysis not found")
+    _authorize_chart(analysis.chart_id, user, service.chart_service)
     return analysis
 
 
@@ -231,11 +251,18 @@ def list_chat_threads(
 ) -> list[dict[str, object]]:
     _authorize_chart(chart_id, user, get_default_chat_service().chart_service)
     with connect() as conn:
-        rows = conn.execute(
-            """SELECT thread_id, chart_id, title, scope, created_at, updated_at
-            FROM chat_threads WHERE chart_id=? AND owner_id=? ORDER BY updated_at DESC""",
-            (chart_id, user.user_id),
-        ).fetchall()
+        if user.is_admin:
+            rows = conn.execute(
+                """SELECT thread_id, chart_id, title, scope, created_at, updated_at
+                FROM chat_threads WHERE chart_id=? ORDER BY updated_at DESC""",
+                (chart_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT thread_id, chart_id, title, scope, created_at, updated_at
+                FROM chat_threads WHERE chart_id=? AND owner_id=? ORDER BY updated_at DESC""",
+                (chart_id, user.user_id),
+            ).fetchall()
     return [dict(row) for row in rows]
 
 

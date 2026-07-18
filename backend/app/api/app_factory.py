@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from ..auth import ensure_initial_admin
+from ..auth import ensure_initial_accounts
 from ..domain.errors import DomainError
 from ..logging_setup import configure_logging
 from .dto import ApiError
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 def create_app() -> FastAPI:
     configure_logging()
-    ensure_initial_admin()
+    ensure_initial_accounts()
     app = FastAPI(
         title="Bazi Agent API",
         version="0.1.0",
