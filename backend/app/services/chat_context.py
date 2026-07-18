@@ -34,6 +34,7 @@ _TOPIC_ORDER: tuple[ChatTopic, ...] = (
 _TOPIC_KEYWORDS: dict[ChatTopic, tuple[str, ...]] = {
     "relationship": (
         "感情",
+        "情感",
         "爱情",
         "婚姻",
         "婚恋",

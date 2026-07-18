@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from collections.abc import Callable
@@ -12,6 +13,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 import httpx
+from jsonschema import Draft202012Validator
 
 from ...logging_setup import append_llm_trace
 
@@ -47,7 +49,7 @@ class ModelOutputTruncatedError(ModelProviderError):
 
 class ModelInvalidOutputError(ModelProviderError):
     error_code = "MODEL_INVALID_OUTPUT"
-    retryable = False
+    retryable = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +63,7 @@ class ProviderResponse:
     streamed: bool = False
     transport_attempts: int = 1
     timings: dict[str, float] = field(default_factory=dict)
+    output_source: str = "content"
 
 
 @dataclass(slots=True)
@@ -98,6 +101,7 @@ class DeepSeekProvider:
         read_timeout_seconds: float | None = None,
         total_timeout_seconds: float | None = None,
         max_transport_attempts: int | None = None,
+        thinking_enabled: bool | None = None,
         client: httpx.Client | None = None,
         trace_sink: TraceSink | None = None,
     ) -> None:
@@ -119,7 +123,10 @@ class DeepSeekProvider:
         )
         configured_attempts = int(os.environ.get("DEEPSEEK_MAX_TRANSPORT_ATTEMPTS", "2"))
         self._max_transport_attempts = max(1, max_transport_attempts or configured_attempts)
-        self._thinking_enabled = os.environ.get("DEEPSEEK_THINKING", "enabled").lower() != "disabled"
+        configured_thinking = os.environ.get("DEEPSEEK_THINKING", "enabled").lower() != "disabled"
+        self._thinking_enabled = (
+            configured_thinking if thinking_enabled is None else thinking_enabled
+        )
         self._reasoning_effort = os.environ.get("DEEPSEEK_REASONING_EFFORT", "high")
         self._max_tokens = int(os.environ.get("DEEPSEEK_MAX_TOKENS", "65536"))
         self._client = client or httpx.Client()
@@ -170,6 +177,7 @@ class DeepSeekProvider:
             try:
                 result = self._complete_stream_attempt(
                     request_body=request_body,
+                    required_schema=schema,
                     prompt_version=prompt_version,
                     attempt=attempt,
                     deadline=deadline,
@@ -191,7 +199,13 @@ class DeepSeekProvider:
                 if isinstance(exc, ModelOutputTruncatedError):
                     raise
                 if not isinstance(
-                    exc, (httpx.TimeoutException, httpx.TransportError, ModelStreamInterruptedError)
+                    exc,
+                    (
+                        httpx.TimeoutException,
+                        httpx.TransportError,
+                        ModelStreamInterruptedError,
+                        ModelInvalidOutputError,
+                    ),
                 ):
                     raise
                 last_error = exc
@@ -222,6 +236,8 @@ class DeepSeekProvider:
 
         if isinstance(last_error, httpx.TimeoutException):
             raise ModelTimeoutError("DeepSeek stream timed out") from last_error
+        if isinstance(last_error, ModelProviderError):
+            raise last_error
         raise ModelStreamInterruptedError("DeepSeek stream was interrupted") from last_error
 
     def _write_attempt_trace(
@@ -281,6 +297,7 @@ class DeepSeekProvider:
                 "reasoning_content": reasoning_content,
                 "content": content,
                 "parsed_payload": response.payload if response is not None else None,
+                "output_source": response.output_source if response is not None else None,
                 "usage": capture.usage,
                 "finish_reason": capture.finish_reason,
                 "stream_done": capture.stream_done,
@@ -302,6 +319,7 @@ class DeepSeekProvider:
         self,
         *,
         request_body: dict[str, Any],
+        required_schema: dict[str, Any],
         prompt_version: str,
         attempt: int,
         deadline: float,
@@ -389,14 +407,29 @@ class DeepSeekProvider:
 
         content = "".join(capture.content_parts).strip()
         reasoning_content = "".join(capture.reasoning_parts)
-        if not content:
+        output_source = "content"
+        structured_text = content
+        if not structured_text:
+            structured_text = _extract_terminal_json(reasoning_content) or ""
+            output_source = "reasoning_fallback"
+        if not structured_text:
             raise ModelInvalidOutputError("DeepSeek returned an empty final answer")
         try:
-            payload = json.loads(content)
+            payload = json.loads(structured_text)
         except json.JSONDecodeError as exc:
             raise ModelInvalidOutputError("DeepSeek returned invalid structured output") from exc
         if not isinstance(payload, dict):
             raise ModelInvalidOutputError("DeepSeek structured output must be an object")
+        validation_errors = sorted(
+            Draft202012Validator(required_schema).iter_errors(payload),
+            key=lambda item: tuple(str(part) for part in item.absolute_path),
+        )
+        if validation_errors:
+            first_error = validation_errors[0]
+            path = ".".join(str(part) for part in first_error.absolute_path) or "$"
+            raise ModelInvalidOutputError(
+                f"DeepSeek structured output did not match required schema at {path}"
+            )
 
         finished = time.monotonic()
         timings = {
@@ -425,4 +458,41 @@ class DeepSeekProvider:
             streamed=True,
             transport_attempts=attempt,
             timings=timings,
+            output_source=output_source,
         )
+
+
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
+
+
+def _extract_terminal_json(reasoning_content: str) -> str | None:
+    """Recover only a complete final JSON object accidentally emitted in reasoning.
+
+    The prose chain of thought is never returned.  A candidate must be the final
+    fenced block or the final non-whitespace value, and later schema validation
+    still decides whether it is usable.
+    """
+    text = reasoning_content.strip()
+    if not text:
+        return None
+
+    fenced = list(_JSON_FENCE_RE.finditer(text))
+    if fenced and not text[fenced[-1].end() :].strip():
+        candidate = fenced[-1].group(1).strip()
+        try:
+            value = json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+        else:
+            if isinstance(value, dict):
+                return candidate
+
+    decoder = json.JSONDecoder()
+    for start in (index for index, char in enumerate(text) if char == "{"):
+        try:
+            value, end = decoder.raw_decode(text, start)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict) and not text[end:].strip():
+            return text[start:end]
+    return None

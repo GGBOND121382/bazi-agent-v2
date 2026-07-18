@@ -194,7 +194,49 @@ def _remove_pointer(document: object, path: str) -> None:
         raise KeyError(path)
 
 
-def _local_repair_schema(paths: set[str]) -> dict[str, Any]:
+def _schema_for_pointer(analysis_schema: dict[str, Any], path: str) -> dict[str, Any]:
+    """Resolve an analysis JSON pointer to the schema for its replacement value."""
+    current: object = analysis_schema
+    for part in _json_pointer_parts(path):
+        if not isinstance(current, dict):
+            raise KeyError(path)
+        if part.isdigit():
+            current = current.get("items")
+        else:
+            properties = current.get("properties")
+            if not isinstance(properties, dict) or part not in properties:
+                raise KeyError(path)
+            current = properties[part]
+    if not isinstance(current, dict):
+        raise KeyError(path)
+    return cast(dict[str, Any], current)
+
+
+def _local_repair_schema(
+    paths: set[str], analysis_schema: dict[str, Any]
+) -> dict[str, Any]:
+    replace_operations = [
+        {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["op", "path", "value"],
+            "properties": {
+                "op": {"const": "replace"},
+                "path": {"const": path},
+                "value": _schema_for_pointer(analysis_schema, path),
+            },
+        }
+        for path in sorted(paths)
+    ]
+    remove_operation = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["op", "path"],
+        "properties": {
+            "op": {"const": "remove"},
+            "path": {"enum": sorted(paths)},
+        },
+    }
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "analysis-json-patch-v2",
@@ -207,14 +249,7 @@ def _local_repair_schema(paths: set[str]) -> dict[str, Any]:
                 "type": "array",
                 "minItems": 1,
                 "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["op", "path"],
-                    "properties": {
-                        "op": {"enum": ["replace", "remove"]},
-                        "path": {"enum": sorted(paths)},
-                        "value": {},
-                    },
+                    "oneOf": [*replace_operations, remove_operation],
                 },
             },
             "repair_summary": {"type": "string"},
@@ -249,7 +284,9 @@ def _collect_ids(value: object, key: str) -> set[str]:
     result: set[str] = set()
     if isinstance(value, dict):
         for name, child in value.items():
-            if name == key and isinstance(child, list):
+            if (name == key or (key == "fact_ids" and name == "fact_refs")) and isinstance(
+                child, list
+            ):
                 result.update(str(item) for item in child if item)
             else:
                 result.update(_collect_ids(child, key))
@@ -257,6 +294,16 @@ def _collect_ids(value: object, key: str) -> set[str]:
         for child in value:
             result.update(_collect_ids(child, key))
     return result
+
+
+def _assessment_refs(item: dict[str, Any]) -> set[str]:
+    """Read current assessment references while retaining legacy report support."""
+    refs: set[str] = set()
+    for key in ("fact_refs", "fact_ids"):
+        raw = item.get(key, [])
+        if isinstance(raw, list):
+            refs.update(str(value) for value in raw if value)
+    return refs
 
 
 def _project_natal_core(
@@ -655,6 +702,7 @@ def _substantive_items(items: list[dict[str, Any]]) -> int:
         "statement",
         "title",
         "relation",
+        "relationship",
         "dimension",
         "stage",
         "period",
@@ -664,15 +712,16 @@ def _substantive_items(items: list[dict[str, Any]]) -> int:
         "risk",
         "protection",
         "advice",
+        "evaluation",
     }
     return sum(1 for item in items if any(str(item.get(key, "")).strip() for key in keys))
 
 
 def _dayun_item_identity(item: dict[str, Any]) -> tuple[set[str], str]:
-    fact_ids_raw = item.get("fact_ids", [])
-    fact_ids = {str(value) for value in fact_ids_raw} if isinstance(fact_ids_raw, list) else set()
+    fact_ids = _assessment_refs(item)
     stage = " ".join(
-        str(item.get(key, "")) for key in ("stage", "period", "title", "ganzhi")
+        str(item.get(key, ""))
+        for key in ("stage", "period", "title", "ganzhi", "gan_zhi", "yun_gan_zhi")
     ).casefold()
     return fact_ids, stage
 
@@ -787,42 +836,44 @@ def _supplement_deterministic_dayun_stages(
         return analysis
 
     items = list(analysis.dayun_assessment)
-    searchable_stages = [str(item.get("stage", "")).casefold() for item in items]
+    identities = [_dayun_item_identity(item) for item in items]
+    searchable_stages = [stage for _, stage in identities]
     additions: list[dict[str, Any]] = []
     if not any(
         "起运" in stage or "qiyun" in stage or "birth" in stage for stage in searchable_stages
     ):
         additions.append(
             {
-                "stage": "出生至起运",
-                "conclusion": "仅列示确定性起运前阶段；扩展解读未通过校验，暂不作趋势断言。",
+                "order": 0,
+                "period": "出生至起运",
+                "gan_zhi": "月柱代运",
+                "analysis": "仅列示确定性起运前阶段；扩展解读未通过校验，暂不作趋势断言。",
                 "coverage_status": "deterministic_fallback",
                 "interpretation_status": "missing",
-                "fact_ids": [],
-                "rule_ids": [],
-                "evidence_ids": [],
+                "fact_refs": [],
             }
         )
 
     for item in dayun:
-        markers = [
-            str(item.get("ganzhi", "")).casefold(),
-            str(item.get("fact_id", "")).casefold(),
-        ]
-        if any(marker and marker in stage for marker in markers for stage in searchable_stages):
+        fact_id = str(item.get("fact_id", ""))
+        ganzhi_marker = str(item.get("ganzhi", "")).casefold()
+        if any(
+            (fact_id and fact_id in refs) or (ganzhi_marker and ganzhi_marker in stage)
+            for refs, stage in identities
+        ):
             continue
         ganzhi = str(item.get("ganzhi", "大运"))
         start_year = item.get("start_year")
         end_year = item.get("end_year")
         additions.append(
             {
-                "stage": f"{ganzhi}大运（{start_year}—{end_year}）",
-                "conclusion": "仅列示确定性排盘阶段；扩展解读未通过校验，暂不作趋势断言。",
+                "order": int(item.get("index", len(items) + len(additions))),
+                "period": f"{start_year}—{end_year}",
+                "gan_zhi": ganzhi,
+                "analysis": "仅列示确定性排盘阶段；扩展解读未通过校验，暂不作趋势断言。",
                 "coverage_status": "deterministic_fallback",
                 "interpretation_status": "missing",
-                "fact_ids": [str(item["fact_id"])] if item.get("fact_id") else [],
-                "rule_ids": [str(item["rule_id"])] if item.get("rule_id") else [],
-                "evidence_ids": [],
+                "fact_refs": [fact_id] if fact_id else [],
             }
         )
 
@@ -1044,7 +1095,7 @@ class AnalysisPipeline:
                     validation=validation,
                     paths=repair_paths,
                 )
-                request_schema = _local_repair_schema(repair_paths)
+                request_schema = _local_repair_schema(repair_paths, schema)
                 request_system_prompt = LOCAL_REPAIR_SYSTEM_PROMPT
                 request_prompt_version = LOCAL_REPAIR_PROMPT_VERSION
             else:

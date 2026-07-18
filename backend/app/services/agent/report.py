@@ -118,10 +118,20 @@ class ReportAssembler:
                     "content_blocks": [
                         _report_block(
                             block_id=f"DAYUN-{index:02d}",
-                            topic=str(item.get("title") or item.get("ganzhi") or item.get("stage") or "大运阶段"),
+                            topic=str(
+                                item.get("title")
+                                or item.get("gan_zhi")
+                                or item.get("ganzhi")
+                                or item.get("period")
+                                or item.get("stage")
+                                or "大运阶段"
+                            ),
                             statement=str(item.get("conclusion") or item.get("summary") or item.get("analysis") or _text(item)),
                             confidence=float(item.get("confidence", 0.75)),
-                            fact_ids=[str(value) for value in item.get("fact_ids", [])],
+                            fact_ids=[
+                                str(value)
+                                for value in (item.get("fact_refs") or item.get("fact_ids") or [])
+                            ],
                             rule_ids=[str(value) for value in item.get("rule_ids", [])],
                             evidence_ids=[str(value) for value in item.get("evidence_ids", [])],
                             counterevidence=[str(value) for value in item.get("counterpoints", [])],
@@ -140,10 +150,24 @@ class ReportAssembler:
                     "content_blocks": [
                         _report_block(
                             block_id=f"KINSHIP-{index:02d}",
-                            topic=str(item.get("relation") or item.get("title") or "六亲分析"),
-                            statement=str(item.get("conclusion") or item.get("summary") or item.get("analysis") or _text(item)),
+                            topic=str(
+                                item.get("relationship")
+                                or item.get("relation")
+                                or item.get("title")
+                                or "六亲分析"
+                            ),
+                            statement=str(
+                                item.get("evaluation")
+                                or item.get("conclusion")
+                                or item.get("summary")
+                                or item.get("analysis")
+                                or _text(item)
+                            ),
                             confidence=float(item.get("confidence", 0.72)),
-                            fact_ids=[str(value) for value in item.get("fact_ids", [])],
+                            fact_ids=[
+                                str(value)
+                                for value in (item.get("fact_refs") or item.get("fact_ids") or [])
+                            ],
                             rule_ids=[str(value) for value in item.get("rule_ids", [])],
                             evidence_ids=[str(value) for value in item.get("evidence_ids", [])],
                             counterevidence=[str(value) for value in item.get("counterpoints", [])],

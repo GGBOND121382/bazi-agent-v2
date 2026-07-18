@@ -35,15 +35,20 @@ const chart = {
     ],
   } },
   pillars: overview.pillars.map((item) => ({ ...item, ganzhi: `${item.stem}${item.branch}`, ten_god_of_stem: item.ten_god })),
-  day_master: '丁', facts: [], engine_versions: [{ engine: 'lunar_python', version: '1.4', took_ms: 1 }], warnings: [],
+  day_master: '丁', facts: [], qiyun: { start_years: 4, start_months: 10, start_days: 23 },
+  dayun: [{ index: 1, ganzhi: '丁亥', start_year: 2000, end_year: 2009, start_age: 6, end_age: 15 }],
+  engine_versions: [{ engine: 'lunar_python', version: '1.4', took_ms: 1 }], warnings: [],
 }
 
 const report = {
   schema_version: 'report-view-v1', report_id: 'report_demo', chart_id: 'chart_demo', title: '结构化命理分析报告', generated_at: '2026-07-16T00:00:00Z',
-  toc: [{ anchor: 'structure', title: '命局结构', level: 1 }],
+  toc: [{ anchor: 'structure', title: '命局结构', level: 1 }, { anchor: 'dayun-lifecycle', title: '一生大运运势', level: 1 }],
   blocks: [
     { block_id: 'h', block_type: 'heading', anchor: 'structure', text: '命局结构', level: 1 },
-    { block_id: 'c', block_type: 'claim', title: '命局与事业财运', summary: '丁火日主生于子月，结合原局与大运，事业宜以专业积累和阶段性主动争取并行。', confidence: .78, fact_ids: ['F1'], rule_ids: ['R1'], evidence_ids: ['E1'], counterevidence: ['若现实行业环境变化，具体节奏需随之调整。'] },
+    { block_id: 'c', block_type: 'claim', title: '结构判断总表', summary: '{"day_master"："丁"，"strength"："身弱"，"yong_shen"："木"，"fact_refs"：["F1"]}', confidence: .78, fact_ids: ['F1'], rule_ids: ['R1'], evidence_ids: ['E1'], counterevidence: ['若现实行业环境变化，具体节奏需随之调整。'] },
+    { block_id: 'dy-h', block_type: 'heading', anchor: 'dayun-lifecycle', text: '一生大运运势', level: 1 },
+    { block_id: 'dy-0', block_type: 'claim', title: '戊子（月柱）', summary: '出生至起运前以月柱事象为主。', confidence: .7, fact_ids: [], rule_ids: [], evidence_ids: [], counterevidence: [] },
+    { block_id: 'dy-1', block_type: 'claim', title: '丁亥', summary: '第一步大运结合原局按条件分析。', confidence: .75, fact_ids: ['D1'], rule_ids: [], evidence_ids: [], counterevidence: [] },
   ],
   citations: [{ evidence_id: 'E1', title: '命理规则资料', source_label: 'RAG 语料', locator: 'SRC#E1' }], limitations: [],
 }
@@ -90,7 +95,18 @@ async function capture(page: Page, testInfo: TestInfo, name: string) {
   await page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true })
 }
 
-test.beforeEach(async ({ page }) => { await mockApi(page) })
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    sessionStorage.setItem('bazi:current-user', JSON.stringify({
+      user_id: 'user_demo',
+      username: 'demo',
+      role: 'admin',
+      enabled: true,
+      must_change_password: false,
+    }))
+  })
+  await mockApi(page)
+})
 
 test('landing', async ({ page }, testInfo) => { await page.goto('/'); await expect(page.getByRole('heading', { level: 1 })).toBeVisible(); await assertAccessible(page); await capture(page, testInfo, 'landing') })
 test('redesigned birth form', async ({ page }, testInfo) => { await page.goto('/charts/new'); await expect(page.getByRole('heading', { name: '建立命盘' })).toBeVisible(); await expect(page.getByTestId('submit')).toBeVisible(); await assertAccessible(page); await capture(page, testInfo, 'wizard') })
@@ -98,5 +114,5 @@ test('detailed chart overview', async ({ page }, testInfo) => { await page.goto(
 test('temporal context', async ({ page }, testInfo) => { await page.goto('/charts/chart_demo/temporal'); await expect(page.getByRole('heading', { name: '2026 流年、大运与原局四柱' })).toBeVisible(); await expect(page.getByLabel('流年大运与四柱专业排盘')).toBeVisible(); await assertAccessible(page); await capture(page, testInfo, 'temporal') })
 test('chart-aware fortune chat', async ({ page }, testInfo) => { await page.goto('/charts/chart_demo/chat'); await page.getByPlaceholder(/今年哪几个月/).fill('今年事业和财运怎么样？'); await page.getByRole('button', { name: '发送问题' }).click(); await expect(page.getByText(/今年事业宜主动争取/)).toBeVisible(); await assertAccessible(page); await capture(page, testInfo, 'chat') })
 test('analysis progress hides chain of thought', async ({ page }, testInfo) => { await page.goto('/jobs/job_demo'); await expect(page.getByText('不展示模型内部思维链')).toBeVisible(); await assertAccessible(page); await capture(page, testInfo, 'progress') })
-test('report and evidence drawer', async ({ page }, testInfo) => { await page.goto('/reports/report_demo'); await page.getByRole('button', { name: '查看命盘事实与参考资料' }).click(); await expect(page.getByRole('dialog')).toBeVisible(); await assertAccessible(page); await capture(page, testInfo, 'report-evidence') })
+test('report dashboard, dayun timeline and evidence drawer', async ({ page }, testInfo) => { await page.goto('/reports/report_demo'); await expect(page.getByText('结构化看板')).toBeVisible(); await expect(page.getByText('第 1 步大运')).toBeVisible(); await expect(page.getByText('6—15岁')).toBeVisible(); await expect(page.getByText('2000—2009年')).toBeVisible(); await page.getByRole('button', { name: '查看命盘事实与参考资料' }).first().click(); await expect(page.getByRole('dialog')).toBeVisible(); await assertAccessible(page); await capture(page, testInfo, 'report-evidence') })
 test('history and settings', async ({ page }, testInfo) => { await page.goto('/history'); await expect(page.getByRole('button', { name: '用户列表' })).toBeVisible(); await assertAccessible(page); await capture(page, testInfo, 'history'); await page.goto('/settings'); await expect(page.getByText('系统配置（只读）')).toBeVisible(); await assertAccessible(page); await capture(page, testInfo, 'settings') })

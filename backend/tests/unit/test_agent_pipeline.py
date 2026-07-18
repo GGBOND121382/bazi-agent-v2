@@ -15,7 +15,7 @@ from app.adapters.llm import (
     ProviderConfigurationError,
     ProviderResponse,
 )
-from app.adapters.llm.deepseek import DeepSeekProvider
+from app.adapters.llm.deepseek import DeepSeekProvider, ModelInvalidOutputError
 from app.api.dto import (
     ChartResultDTO,
     EngineVersionDTO,
@@ -24,6 +24,7 @@ from app.api.dto import (
     StructuredAnalysisDTO,
 )
 from app.services.agent import AnalysisPipeline, ReportAssembler, verify_analysis
+from app.services.agent.professional_core import _local_repair_schema
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -271,6 +272,166 @@ def test_deepseek_rejects_truncated_stream(monkeypatch: pytest.MonkeyPatch) -> N
     assert traces[0]["error"]["type"] == "ModelOutputTruncatedError"
 
 
+def test_deepseek_streams_structured_content_with_thinking_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    request_bodies: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        request_bodies.append(json.loads(request.content))
+        return _sse_response(
+            {"choices": [{"delta": {"content": '{"answer":"ok"}'}, "finish_reason": "stop"}]},
+            {"choices": [], "usage": {"completion_tokens": 4}},
+        )
+
+    provider = DeepSeekProvider(
+        thinking_enabled=False,
+        max_transport_attempts=1,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        trace_sink=lambda _trace: None,
+    )
+    response = provider.complete_json(
+        system_prompt="chat",
+        input_payload={},
+        schema={"type": "object"},
+        prompt_version="chat-test-v1",
+    )
+
+    assert response.streamed is True
+    assert response.payload == {"answer": "ok"}
+    assert request_bodies[0]["stream"] is True
+    assert request_bodies[0]["thinking"] == {"type": "disabled"}
+    assert request_bodies[0]["temperature"] == 0
+    assert "reasoning_effort" not in request_bodies[0]
+
+
+def test_deepseek_recovers_schema_valid_terminal_json_from_reasoning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    traces: list[dict[str, Any]] = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return _sse_response(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "reasoning_content": (
+                                "先分析命盘，过程中的对象 {不是最终结果}。\n"
+                                '```json\n{"answer":"recovered"}\n```'
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    provider = DeepSeekProvider(
+        max_transport_attempts=1,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        trace_sink=traces.append,
+    )
+    response = provider.complete_json(
+        system_prompt="chat",
+        input_payload={},
+        schema={
+            "type": "object",
+            "required": ["answer"],
+            "properties": {"answer": {"type": "string", "minLength": 1}},
+        },
+        prompt_version="chat-reasoning-fallback-v1",
+    )
+
+    assert response.payload == {"answer": "recovered"}
+    assert response.output_source == "reasoning_fallback"
+    assert response.transport_attempts == 1
+    assert traces[0]["status"] == "succeeded"
+    assert traces[0]["response"]["content"] == ""
+    assert traces[0]["response"]["output_source"] == "reasoning_fallback"
+
+
+def test_deepseek_retries_output_that_fails_required_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setattr("app.adapters.llm.deepseek.time.sleep", lambda _seconds: None)
+    calls = 0
+    traces: list[dict[str, Any]] = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        answer = "" if calls == 1 else "retried"
+        return _sse_response(
+            {
+                "choices": [
+                    {
+                        "delta": {"content": json.dumps({"answer": answer})},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    provider = DeepSeekProvider(
+        max_transport_attempts=2,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        trace_sink=traces.append,
+    )
+    response = provider.complete_json(
+        system_prompt="chat",
+        input_payload={},
+        schema={
+            "type": "object",
+            "required": ["answer"],
+            "properties": {"answer": {"type": "string", "minLength": 1}},
+        },
+        prompt_version="chat-schema-retry-v1",
+    )
+
+    assert calls == 2
+    assert response.payload == {"answer": "retried"}
+    assert response.output_source == "content"
+    assert response.transport_attempts == 2
+    assert [trace["status"] for trace in traces] == ["failed", "succeeded"]
+    assert traces[0]["error"]["type"] == "ModelInvalidOutputError"
+
+
+def test_deepseek_preserves_invalid_output_error_after_retries_are_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return _sse_response(
+            {
+                "choices": [
+                    {"delta": {"content": '{"answer":""}'}, "finish_reason": "stop"}
+                ]
+            },
+        )
+
+    provider = DeepSeekProvider(
+        max_transport_attempts=1,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        trace_sink=lambda _trace: None,
+    )
+    with pytest.raises(ModelInvalidOutputError):
+        provider.complete_json(
+            system_prompt="chat",
+            input_payload={},
+            schema={
+                "type": "object",
+                "required": ["answer"],
+                "properties": {"answer": {"type": "string", "minLength": 1}},
+            },
+            prompt_version="chat-schema-failure-v1",
+        )
+
+
 @pytest.mark.rag
 def test_verifier_rejects_hallucinated_ids_and_high_risk_assertions() -> None:
     analysis = _analysis(
@@ -364,6 +525,25 @@ def test_pipeline_repairs_only_the_missing_core_section_with_minimal_context() -
     assert repair_size < full_size * 1.1
 
 
+def test_local_repair_schema_binds_replace_value_to_target_subschema() -> None:
+    analysis_schema = json.loads(
+        (ROOT / "contracts" / "schemas" / "analysis_output.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    repair_schema = _local_repair_schema({"/kinship_assessment"}, analysis_schema)
+    variants = repair_schema["properties"]["operations"]["items"]["oneOf"]
+    replace = next(item for item in variants if item["properties"]["op"] == {"const": "replace"})
+    assert replace["properties"]["path"] == {"const": "/kinship_assessment"}
+    value_schema = replace["properties"]["value"]
+    assert value_schema == analysis_schema["properties"]["kinship_assessment"]
+    assert value_schema["items"]["required"] == [
+        "relationship",
+        "evaluation",
+        "fact_refs",
+    ]
+
+
 @pytest.mark.rag
 def test_pipeline_discards_one_malformed_claim_and_normalizes_evidence_ids() -> None:
     payload = _analysis().model_dump(mode="json")
@@ -407,7 +587,7 @@ def test_pipeline_supplements_missing_deterministic_dayun_with_fallback_marker()
         chart=chart, user_focus=("大运",), max_revisions=0
     )
     assert result.validation.status == "passed"
-    fallback = next(item for item in result.analysis.dayun_assessment if "丁亥" in item["stage"])
+    fallback = next(item for item in result.analysis.dayun_assessment if item.get("gan_zhi") == "丁亥")
     assert fallback["coverage_status"] == "deterministic_fallback"
     assert fallback["interpretation_status"] == "missing"
 

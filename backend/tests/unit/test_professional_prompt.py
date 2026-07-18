@@ -8,7 +8,7 @@ from pathlib import Path
 from app.api.dto import ChartResultDTO, EngineVersionDTO, FactDTO, PillarDTO, StructuredAnalysisDTO
 from app.services.agent.context import build_analysis_context
 from app.services.agent.professional import PROFESSIONAL_RUBRIC, reflection_requires_revision
-from app.services.agent.prompts import INTERPRETER_SYSTEM_PROMPT
+from app.services.agent.prompts import INTERPRETER_SYSTEM_PROMPT, build_fortune_chat_system_prompt
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -141,3 +141,20 @@ def test_core_prompt_requires_kinship_health_and_full_lifecycle_dayun() -> None:
     )
     assert "required_analysis_dimensions" not in context
     assert context["temporal_hierarchy"]["dayun_sequence"]
+
+
+def test_fortune_chat_prompt_separates_thinking_from_final_json_content() -> None:
+    prompt = build_fortune_chat_system_prompt(scope="year", topics=("relationship",))
+
+    for term in (
+        "reasoning_content 中完成充分分析",
+        "切换到最终回答阶段",
+        "content 绝对不得为空",
+        "一个裸 JSON 对象",
+        "不得使用 Markdown 代码围栏",
+        '"reasoning_summary"',
+        '"citations":[]',
+    ):
+        assert term in prompt
+    assert "感情婚恋" in prompt
+    assert "scope=year" in prompt

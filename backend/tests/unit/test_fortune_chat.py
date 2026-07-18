@@ -2,6 +2,8 @@
 from datetime import date
 from typing import Any
 
+import pytest
+
 from app.adapters.llm import ProviderResponse
 from app.api.dto import (
     ChartResultDTO,
@@ -10,7 +12,7 @@ from app.api.dto import (
     PillarDTO,
     TemporalContextViewDTO,
 )
-from app.services.chat import FortuneChatService
+from app.services.chat import FortuneChatService, _default_chat_provider
 
 
 class _ChartService:
@@ -156,3 +158,11 @@ def test_fortune_chat_builds_deterministic_temporal_context_and_filters_citation
     ]
     assert "scope=year" in provider.system_prompt
     assert "事业学业" in provider.system_prompt
+
+
+def test_default_chat_provider_keeps_streaming_and_enables_thinking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    provider = _default_chat_provider()
+    assert provider._thinking_enabled is True

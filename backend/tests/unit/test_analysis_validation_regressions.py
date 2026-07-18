@@ -7,7 +7,11 @@ from app.adapters.llm import ProviderResponse
 from app.api.dto import ChartResultDTO, EngineVersionDTO, FactDTO, PillarDTO, StructuredAnalysisDTO
 from app.services.agent import AnalysisPipeline, verify_analysis
 from app.services.agent.context import build_analysis_context
-from app.services.agent.professional_core import _enforce_core_topic_coverage, _relations
+from app.services.agent.professional_core import (
+    _enforce_core_topic_coverage,
+    _relations,
+    _supplement_deterministic_dayun_stages,
+)
 
 
 def _chart() -> ChartResultDTO:
@@ -319,6 +323,95 @@ def test_health_assessment_structured_fields_count_as_substantive() -> None:
     assert "MISSING_HEALTH_ASSESSMENT" not in {
         item["code"] for item in validation.errors
     }
+
+
+def test_new_assessment_contract_fields_pass_core_coverage() -> None:
+    chart = _chart()
+    payload = _analysis().model_dump(mode="json")
+    payload["kinship_assessment"] = [
+        {
+            "relationship": name,
+            "star": "六亲星",
+            "palace": "相关宫位",
+            "evaluation": "结合六亲星、宫位与岁运触发分析。",
+            "fact_refs": ["FACT-DM-1"],
+        }
+        for name in ["父亲", "母亲", "兄弟姐妹", "配偶婚恋", "子女", "家庭互动"]
+    ]
+    payload["dayun_assessment"] = [
+        {
+            "order": 0,
+            "period": "出生至起运前",
+            "gan_zhi": "月柱代运",
+            "analysis": "说明起运前阶段。",
+            "fact_refs": [],
+        },
+        {
+            "order": 3,
+            "period": "2020—2029（26—35岁）",
+            "gan_zhi": "乙酉",
+            "analysis": "结构、事业、财运、感情六亲、健康及承接均按条件分析。",
+            "fact_refs": ["DAYUN-3"],
+        },
+    ]
+    analysis = StructuredAnalysisDTO.model_validate(payload)
+    validation = verify_analysis(
+        chart=chart,
+        evidence=(),
+        analysis=analysis,
+        configured_school="engineering_policy",
+        computed_relations=_relations(chart),
+    )
+    validation = _enforce_core_topic_coverage(
+        chart=chart, analysis=analysis, validation=validation
+    )
+    assert validation.status == "passed"
+    assert not {
+        "MISSING_KINSHIP_ASSESSMENT",
+        "INCOMPLETE_DAYUN_ASSESSMENT",
+    } & {item["code"] for item in validation.errors}
+
+
+def test_dayun_fallback_does_not_duplicate_new_contract_stages() -> None:
+    chart = _chart()
+    payload = _analysis().model_dump(mode="json")
+    payload["dayun_assessment"] = [
+        {
+            "order": 0,
+            "period": "出生至起运前",
+            "gan_zhi": "月柱代运",
+            "analysis": "说明起运前阶段。",
+            "fact_refs": [],
+        },
+        {
+            "order": 3,
+            "period": "2020—2029",
+            "gan_zhi": "乙酉",
+            "analysis": "完整分析。",
+            "fact_refs": ["DAYUN-3"],
+        },
+    ]
+    analysis = StructuredAnalysisDTO.model_validate(payload)
+    supplemented = _supplement_deterministic_dayun_stages(chart, analysis)
+    assert supplemented is analysis
+    assert len(supplemented.dayun_assessment) == 2
+
+
+def test_assessment_fact_refs_still_reject_unknown_ids() -> None:
+    chart = _chart()
+    payload = _analysis().model_dump(mode="json")
+    payload["kinship_assessment"][0]["fact_refs"] = ["shensha-invented"]
+    analysis = StructuredAnalysisDTO.model_validate(payload)
+    validation = verify_analysis(
+        chart=chart,
+        evidence=(),
+        analysis=analysis,
+        configured_school="engineering_policy",
+        computed_relations=_relations(chart),
+    )
+    unknown = next(item for item in validation.errors if item["code"] == "UNKNOWN_FACT")
+    assert unknown["path"] == "/kinship_assessment/0"
+    assert unknown["detail"] == "shensha-invented"
 
 
 def test_verifier_relation_catalog_accepts_engine_supported_relations() -> None:

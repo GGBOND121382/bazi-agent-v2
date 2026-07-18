@@ -272,6 +272,33 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .claim-card h2 { margin: 10px 0; font-size: 1.16rem; }.claim-card p { margin: 0; line-height: 1.78; white-space: pre-wrap; }
 .counter-evidence { margin-top: 12px; padding: 10px; border-radius: 10px; background: #f6f2e9; color: #6f6450; }
 .evidence-button { margin-top: 14px; padding: 9px 12px; border: 1px solid #d8c89f; border-radius: 9px; background: #fffaf0; color: #796130; }
+.structured-claim-card { overflow: hidden; background: linear-gradient(145deg, #fff, #fbfaf6); }
+.structured-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 14px 0 0; }
+.structured-field { min-width: 0; padding: 12px 13px; border: 1px solid #ebe5d8; border-radius: 12px; background: #f8f5ee; }
+.structured-field.wide { grid-column: 1 / -1; }
+.structured-field dt { margin-bottom: 5px; color: #81672f; font-size: .76rem; font-weight: 700; letter-spacing: .04em; }
+.structured-field dd { margin: 0; color: #34312c; font-size: .95rem; line-height: 1.65; overflow-wrap: anywhere; }
+.structured-references { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.structured-references span { padding: 5px 8px; border-radius: 999px; background: #efebe2; color: #665c49; font-size: .7rem; overflow-wrap: anywhere; }
+.dayun-card { position: relative; display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 14px; padding: 18px 18px 18px 10px; overflow: hidden; }
+.dayun-card::before { content: ''; position: absolute; top: 0; bottom: 0; left: 35px; width: 2px; background: linear-gradient(#d9c68f, #ede5d2); }
+.dayun-card[data-pre-qiyun="true"] { background: linear-gradient(145deg, #29251d, #403729); color: #fff; }
+.dayun-card[data-pre-qiyun="true"]::before { background: #a98c4f; }
+.dayun-marker { position: relative; z-index: 1; display: flex; justify-content: center; padding-top: 2px; }
+.dayun-marker span { display: grid; place-items: center; width: 38px; height: 38px; border: 3px solid #fff; border-radius: 50%; background: #9a7a36; color: #fff; box-shadow: 0 0 0 1px #d5c18d; font-family: serif; font-weight: 700; }
+.dayun-content { min-width: 0; }
+.dayun-card-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dayun-card-header i { color: #77736d; font-size: .72rem; font-style: normal; }
+.dayun-stage-badge { padding: 5px 9px; border-radius: 999px; background: #eee5d0; color: #69501e; font-size: .74rem; font-weight: 700; }
+.dayun-title-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin: 9px 0 10px; }
+.dayun-title-row h2 { margin: 0; font-size: 1.3rem; }
+.dayun-time-labels { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.dayun-time-labels span { padding: 5px 8px; border: 1px solid #dfd5be; border-radius: 7px; background: #faf7f0; color: #63583f; font-size: .76rem; white-space: nowrap; }
+.dayun-content > p { margin: 0; color: #403d37; line-height: 1.78; white-space: pre-wrap; }
+.dayun-card[data-pre-qiyun="true"] .dayun-stage-badge { background: #a4884d; color: #fff; }
+.dayun-card[data-pre-qiyun="true"] .dayun-time-labels span { border-color: #6f624a; background: rgba(255,255,255,.08); color: #eee3c9; }
+.dayun-card[data-pre-qiyun="true"] .dayun-content > p { color: #e6e1d7; }
+.dayun-card[data-pre-qiyun="true"] .dayun-card-header i { color: #c8c0b1; }
 .callout, .supplement-panel { padding: 16px; }.supplement-panel h2 { margin: 0 0 8px; font-size: 1rem; }.supplement-panel p { margin: 6px 0; color: #777; }
 .block-alternative { color: #888; }
 
@@ -313,12 +340,19 @@ code { font-size: .75rem; overflow-wrap: anywhere; color: #695c45; }
   .user-pillars span { display: none; }
   .report-hero { align-items: flex-start; }
   .report-seal { width: 52px; height: 52px; flex-basis: 52px; }
+  .structured-grid { grid-template-columns: 1fr; }
+  .structured-field.wide { grid-column: auto; }
+  .dayun-card { grid-template-columns: 42px minmax(0, 1fr); gap: 10px; padding: 15px 12px 15px 6px; }
+  .dayun-card::before { left: 26px; }
+  .dayun-marker span { width: 34px; height: 34px; }
+  .dayun-title-row { display: block; }
+  .dayun-time-labels { justify-content: flex-start; margin-top: 8px; }
 }
 
 @media print {
   .topbar, .bottom-nav, .report-toolbar, .report-toc, .evidence-drawer, .drawer-backdrop, .chat-composer, button { display: none !important; }
   .app-shell { padding: 0; }.page-shell { width: 100%; padding: 0; }.report-page { max-width: none; }
-  .claim-card { break-inside: avoid; box-shadow: none; border: 1px solid #ddd; }
+  .claim-card, .dayun-card { break-inside: avoid; box-shadow: none; border: 1px solid #ddd; }
 }
 
 /* Toy authentication/admin and audit additions. */

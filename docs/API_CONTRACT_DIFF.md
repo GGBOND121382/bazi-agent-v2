@@ -1,5 +1,12 @@
 # API CONTRACT DIFF
 
+## 2026-07-18
+
+- `analysis-output-v1.kinship_assessment.items` 从开放对象收紧为 `relationship`、`evaluation`、`fact_refs` 必填，`star`、`palace`、`confidence` 可选。
+- `analysis-output-v1.dayun_assessment.items` 从开放对象收紧为 `order`、`period`、`gan_zhi`、`analysis`、`fact_refs` 必填，并允许年龄、年份、时序关系引用及确定性兜底状态字段。
+- 这是同版本的缺陷修复：服务端读取仍兼容既有报告使用的 `relation/conclusion/fact_ids`、`stage/ganzhi` 字段；新生成内容和局部修复统一使用新版字段。
+- `POST /api/v1/charts/{chart_id}/chat` 的上游模型失败不再泄漏为非 JSON 500；现在返回 `api-error-v1`、`error_code=MODEL_PROVIDER_ERROR`、HTTP 502 且 `retryable=true`，`safe_details.provider_error` 保留具体安全错误码。
+
 ## 2026-07-17
 
 - `ChartResultDTO.calendar` 增加 `deterministic_details` 运行时对象，承载截图所需的确定性展示字段：农历、节气前后时长、生肖、星座、星宿、胎元、胎息、命宫、身宫、人元司令、四柱十神、藏干、十二长生、自坐、空亡、纳音、神煞和五行统计。现有 Schema 中 `calendar` 为开放对象，因此版本仍为 `chart-result-v1`。

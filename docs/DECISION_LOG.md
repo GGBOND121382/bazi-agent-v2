@@ -1,5 +1,10 @@
 # DECISION LOG
 
+## 2026-07-18
+
+- **DEC-019**：`analysis-output-v1` 的六亲与大运专题采用显式字段契约：六亲使用 `relationship/evaluation/fact_refs`，大运使用 `order/period/gan_zhi/analysis/fact_refs`；校验与确定性兜底同时兼容旧版 `relation/conclusion/fact_ids` 和 `stage/ganzhi` 历史数据。专题内引用仍必须来自模型可见的确定性 `fact_id`。局部 JSON Patch 的 `replace.value` 必须绑定目标路径的真实子 Schema，不再允许任意 JSON。
+- **DEC-020**：命盘对话继续使用 DeepSeek SSE 流式传输并启用 thinking，以保留复杂岁运分析质量。Prompt 明确区分 `reasoning_content` 与最终 `content`，要求思考后在 `content` 输出无 Markdown 围栏的单一 JSON 对象。若 DeepSeek 偶发将最终 JSON 留在 reasoning 尾部，适配器只提取末尾完整对象并执行真实 JSON Schema 校验，不向用户返回前面的思维过程；空内容、非法 JSON 或 Schema 不合格自动重试一次。最终 provider 失败通过 `MODEL_PROVIDER_ERROR`（HTTP 502、可重试）返回。
+
 ## 2026-07-17
 
 - **DEC-014**：确定性校验只保护排盘事实、引用 ID 和极端高风险绝对断言；旺衰、格局、喜忌、用神、事业、财运、感情等属于模型结合 RAG 的解释层判断，不再因其具有流派性而禁止输出。

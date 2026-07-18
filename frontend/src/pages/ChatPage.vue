@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { useBaziClient } from '@/api'
+import { ApiError, useBaziClient } from '@/api'
 import type {
   ChatScope,
   ChatThreadSummaryDTO,
@@ -56,7 +56,7 @@ const threadId = ref<string | undefined>()
 const messages = ref<ChatMessage[]>([
   {
     role: 'assistant',
-    content: '可以询问出生至起运、任意一步大运，以及流年、流月、流日中的事业、财运、感情六亲和健康。我会使用确定性命盘、大运表与 RAG 资料回答。',
+    content: '可以询问出生至起运、任意一步大运，以及流年、流月、流日中的事业、财运、感情六亲和健康。我会使用确定性命盘与大运表回答。',
   },
 ])
 
@@ -133,7 +133,10 @@ async function send(preset?: string) {
     })
     await refreshThreads()
   } catch (cause) {
-    const message = cause instanceof Error ? cause.message : '问答请求失败'
+    const message = cause instanceof ApiError && cause.detail.error_code === 'MODEL_PROVIDER_ERROR'
+      ? '模型本次未生成有效答复，请稍后重试。'
+      : cause instanceof Error ? cause.message : '问答请求失败'
+    question.value = text
     error.value = message
     messages.value.push({ role: 'assistant', content: `暂时无法完成本次分析：${message}` })
   } finally {

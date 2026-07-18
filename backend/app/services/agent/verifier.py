@@ -629,6 +629,26 @@ def verify_analysis(
     if analysis.school != configured_school:
         errors.append({"code": "SCHOOL_MISMATCH", "detail": "analysis school is not configured"})
 
+    for section_name, items in (
+        ("kinship_assessment", analysis.kinship_assessment),
+        ("dayun_assessment", analysis.dayun_assessment),
+    ):
+        for index, item in enumerate(items):
+            referenced_ids: set[str] = set()
+            for key in ("fact_refs", "fact_ids", "trel_refs"):
+                raw = item.get(key, [])
+                if isinstance(raw, list):
+                    referenced_ids.update(str(value) for value in raw if value)
+            missing_facts = sorted(referenced_ids - indexes.known_fact_ids)
+            if missing_facts:
+                errors.append(
+                    {
+                        "code": "UNKNOWN_FACT",
+                        "path": f"/{section_name}/{index}",
+                        "detail": ",".join(missing_facts),
+                    }
+                )
+
     for claim in analysis.claims:
         before = len(errors)
         missing_facts = sorted(set(claim.fact_ids) - indexes.known_fact_ids)

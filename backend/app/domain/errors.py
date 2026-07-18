@@ -51,3 +51,10 @@ class NeedsUserResolutionError(DomainError):
 
 class InvalidInputError(DomainError):
     error_code = "INVALID_INPUT"
+
+
+class ModelProviderDomainError(DomainError):
+    """Public-safe wrapper for an expected upstream model failure."""
+
+    error_code = "MODEL_PROVIDER_ERROR"
+    retryable = True

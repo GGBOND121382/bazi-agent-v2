@@ -17,6 +17,13 @@ from .chat_context import build_model_context, compact_history, detect_chat_topi
 
 ChatScope = Literal["general", "dayun", "lifecycle", "year", "month", "day"]
 
+
+def _default_chat_provider() -> StructuredOutputProvider:
+    # Fortune analysis benefits materially from reasoning.  The provider keeps
+    # the public answer separate and has a schema-checked recovery path for the
+    # occasional DeepSeek JSON response that lands at the end of reasoning.
+    return DeepSeekProvider(thinking_enabled=True)
+
 _CHAT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -64,7 +71,7 @@ class FortuneChatService:
         self,
         *,
         chart_service: ChartService,
-        provider_factory: Callable[[], StructuredOutputProvider] = DeepSeekProvider,
+        provider_factory: Callable[[], StructuredOutputProvider] = _default_chat_provider,
     ) -> None:
         self.chart_service = chart_service
         self.provider_factory = provider_factory
@@ -190,6 +197,7 @@ class FortuneChatService:
             "provider_finish_reason": response.finish_reason,
             "provider_streamed": response.streamed,
             "provider_transport_attempts": response.transport_attempts,
+            "provider_output_source": response.output_source,
             "provider_timings": response.timings,
         }
         resolved_thread_id = self._save_conversation(

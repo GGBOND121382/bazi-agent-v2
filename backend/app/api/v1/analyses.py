@@ -11,8 +11,9 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from ...adapters.llm import ModelProviderError
 from ...auth import CurrentUser, require_user
-from ...domain.errors import InvalidInputError
+from ...domain.errors import InvalidInputError, ModelProviderDomainError
 from ...jobs import AnalysisJobService, JobStateError, get_default_analysis_service
 from ...jobs.state import TERMINAL_STAGES
 from ...persistence import connect
@@ -118,6 +119,11 @@ def chat_about_chart(
             thread_id=request.thread_id,
             target_dayun_index=request.target_dayun_index,
         )
+    except ModelProviderError as exc:
+        raise ModelProviderDomainError(
+            "model generation failed",
+            safe_details={"provider_error": exc.error_code},
+        ) from exc
     except ValueError as exc:
         raise InvalidInputError(str(exc)) from exc
 

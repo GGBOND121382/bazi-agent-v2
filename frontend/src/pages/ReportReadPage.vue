@@ -1,9 +1,26 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import EvidenceDrawer from '@/components/EvidenceDrawer.vue'
 import { useBaziClient } from '@/api'
-import type { ReportBlockDTO, ReportViewDTO } from '@/api/schema'
+import type { ChartResultDTO, ReportBlockDTO, ReportViewDTO } from '@/api/schema'
+import {
+  buildDayunDisplayMeta,
+  displayValue,
+  fieldLabel,
+  isWideStructuredField,
+  parseStructuredSummary,
+  structuredEntries,
+  structuredReferences,
+  type DayunDisplayMeta,
+  type StructuredSummary,
+} from '@/utils/report-presentation'
+
+type DisplayBlock = ReportBlockDTO & {
+  sectionAnchor: string
+  structuredSummary: StructuredSummary | null
+  dayunMeta: DayunDisplayMeta | null
+}
 
 const props = withDefaults(defineProps<{ reportId: string; printMode?: boolean }>(), { printMode: false })
 const client = useBaziClient()
@@ -13,6 +30,7 @@ const selected = ref<ReportBlockDTO | null>(null)
 const generationTrace = ref<Record<string, unknown> | null>(null)
 const traceOpen = ref(false)
 const shareInfo = ref<{ share_id: string; share_token: string; expires_at: string } | null>(null)
+const chart = ref<ChartResultDTO | null>(null)
 const useMocks = import.meta.env.VITE_USE_MOCKS === 'true'
 const { data, isLoading, isError, error } = useQuery<ReportViewDTO>({
   queryKey: ['report', props.reportId],
@@ -21,6 +39,42 @@ const { data, isLoading, isError, error } = useQuery<ReportViewDTO>({
     const response = await fetch(new URL('@contracts/examples/report_view.mock.json', import.meta.url).href)
     return (await response.json()) as ReportViewDTO
   },
+})
+
+let chartRequest = 0
+watch(data, (report) => {
+  const request = ++chartRequest
+  chart.value = null
+  if (!report || useMocks) return
+  void client.getChart(report.chart_id)
+    .then((result) => {
+      if (request === chartRequest) chart.value = result
+    })
+    .catch(() => {
+      if (request === chartRequest) chart.value = null
+    })
+}, { immediate: true })
+
+const displayBlocks = computed<DisplayBlock[]>(() => {
+  let sectionAnchor = ''
+  let dayunOrdinal = 0
+  return (data.value?.blocks ?? []).map((block) => {
+    if (block.block_type === 'heading') {
+      sectionAnchor = block.anchor ?? ''
+      if (sectionAnchor === 'dayun-lifecycle') dayunOrdinal = 0
+    }
+    const isDayun = block.block_type === 'claim' && sectionAnchor === 'dayun-lifecycle'
+    const currentOrdinal = dayunOrdinal
+    if (isDayun) dayunOrdinal += 1
+    return {
+      ...block,
+      sectionAnchor,
+      structuredSummary: block.block_type === 'claim' ? parseStructuredSummary(block.summary) : null,
+      dayunMeta: isDayun
+        ? buildDayunDisplayMeta(block.title ?? '大运阶段', currentOrdinal, chart.value)
+        : null,
+    }
+  })
 })
 
 const drawerItems = computed(() => {
@@ -65,7 +119,7 @@ function printReport() { window.print() }
     <template v-else-if="data">
       <header class="report-hero">
         <span class="report-seal">析</span>
-        <div><p class="eyebrow">大模型 + RAG 综合分析</p><h1 id="report-title">{{ data.title }}</h1>
+        <div><p class="eyebrow">大模型 + 确定性规则综合分析</p><h1 id="report-title">{{ data.title }}</h1>
           <p>生成于 {{ new Date(data.generated_at).toLocaleString('zh-CN') }}</p>
         </div>
       </header>
@@ -84,10 +138,48 @@ function printReport() { window.print() }
       <p v-if="shareInfo" class="share-token card-surface">分享令牌：<code>{{ shareInfo.share_token }}</code><br />过期时间：{{ shareInfo.expires_at }}</p>
 
       <article class="report-body">
-        <template v-for="block in data.blocks" :key="block.block_id">
+        <template v-for="block in displayBlocks" :key="block.block_id">
           <component :is="`h${block.level ?? 2}`" v-if="block.block_type === 'heading'" :id="block.anchor ?? undefined" class="report-heading">{{ block.text }}</component>
           <p v-else-if="block.block_type === 'paragraph'" class="report-paragraph">{{ block.text }}</p>
           <aside v-else-if="block.block_type === 'callout'" class="callout card-surface" :data-tone="block.tone"><strong>{{ block.title }}</strong><p>{{ block.text }}</p></aside>
+          <section v-else-if="block.block_type === 'claim' && block.dayunMeta" class="dayun-card card-surface" :data-pre-qiyun="block.dayunMeta.isPreQiyun">
+            <div class="dayun-marker" aria-hidden="true"><span>{{ block.dayunMeta.isPreQiyun ? '启' : '运' }}</span></div>
+            <div class="dayun-content">
+              <header class="dayun-card-header">
+                <span class="dayun-stage-badge">{{ block.dayunMeta.stageLabel }}</span>
+                <i v-if="block.confidence">置信度 {{ Math.round(block.confidence * 100) }}%</i>
+              </header>
+              <div class="dayun-title-row">
+                <h2>{{ block.title }}</h2>
+                <div class="dayun-time-labels" aria-label="大运年龄与年份">
+                  <span>{{ block.dayunMeta.ageLabel }}</span>
+                  <span>{{ block.dayunMeta.periodLabel }}</span>
+                </div>
+              </div>
+              <p>{{ block.summary }}</p>
+              <div v-if="professional && block.counterevidence?.length" class="counter-evidence"><strong>其他可能：</strong>{{ block.counterevidence.join('；') }}</div>
+              <button type="button" class="evidence-button" @click="showEvidence(block)">查看命盘事实与参考资料</button>
+            </div>
+          </section>
+          <section v-else-if="block.block_type === 'claim' && block.structuredSummary" class="claim-card structured-claim-card card-surface">
+            <header><span>结构化看板</span><i v-if="block.confidence">置信度 {{ Math.round(block.confidence * 100) }}%</i></header>
+            <h2>{{ block.title }}</h2>
+            <dl class="structured-grid">
+              <div
+                v-for="([key, value], index) in structuredEntries(block.structuredSummary)"
+                :key="`${key}-${index}`"
+                class="structured-field"
+                :class="{ wide: isWideStructuredField(key, value) }"
+              >
+                <dt>{{ fieldLabel(key) }}</dt>
+                <dd>{{ displayValue(value) }}</dd>
+              </div>
+            </dl>
+            <div v-if="professional && structuredReferences(block.structuredSummary).length" class="structured-references">
+              <span v-for="reference in structuredReferences(block.structuredSummary)" :key="reference">{{ reference }}</span>
+            </div>
+            <button type="button" class="evidence-button" @click="showEvidence(block)">查看命盘事实与参考资料</button>
+          </section>
           <section v-else-if="block.block_type === 'claim'" class="claim-card card-surface">
             <header><span>综合判断</span><i v-if="block.confidence">置信度 {{ Math.round(block.confidence * 100) }}%</i></header>
             <h2>{{ block.title }}</h2><p>{{ block.summary }}</p>
