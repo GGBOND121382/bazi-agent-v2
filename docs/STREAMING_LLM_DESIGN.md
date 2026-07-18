@@ -7,7 +7,7 @@
 ## 主调用
 
 ```text
-确定性命盘 + 完整大运 + 分组 RAG + 输出契约
+紧凑确定性命盘 + 完整大运 + 输出契约
                     ↓
 DeepSeek V4-Pro thinking（单次 SSE 流）
                     ↓
@@ -15,7 +15,7 @@ reasoning_content / content 分别累计
                     ↓
 收到 [DONE] 后解析完整 JSON
                     ↓
-Schema + 确定性事实 + 引用 + 核心专题覆盖校验
+Schema + 确定性规则 + 核心专题覆盖校验
 ```
 
 - `reasoning_content` 是 DeepSeek API 显式返回的 provider reasoning；它与最终 JSON 分开保存。
@@ -45,7 +45,7 @@ Schema + 确定性事实 + 引用 + 核心专题覆盖校验
 - `executive_summary`
 - `reflection`
 
-局部修复请求仍携带确定性命盘、分组 RAG、引用白名单、全局结构判断和当前候选报告，但只允许返回目标字段的完整替换值。未列入目标的字段被冻结。无法安全定位的跨章节矛盾才回退为完整修订。
+局部修复请求根据错误类型与 JSON 路径投影最小事实闭包，只携带错误块、冻结的全局结构结论、少量一致性相邻块及必要原局/岁运事实。模型只能返回受限 `analysis-json-patch-v2`；未列入 `allowed_paths` 的字段被冻结。无法安全定位的跨章节矛盾才回退为完整修订。
 
 ## 进度
 
@@ -64,13 +64,12 @@ Schema + 确定性事实 + 引用 + 核心专题覆盖校验
 报告和问答轨迹保存：
 
 - 模型与 Prompt 版本；
-- 实际输入；
-- RAG 查询与命中；
+- 实际输入与本次 JSON Schema；
 - provider `reasoning_content`；
 - 最终 JSON；
 - token usage；
 - 首个 chunk 延迟与总耗时；
 - 传输尝试次数与 `finish_reason`；
-- 验证结果、局部修复目标和合并后的候选报告。
+- 程序规则验证、程序 Reflection、局部修复目标和合并后的候选报告。
 
 不会记录 DeepSeek API Key、Cookie 或密码。

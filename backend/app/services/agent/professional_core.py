@@ -1,4 +1,5 @@
 """Professional analysis core using immutable deterministic chart context."""
+
 from __future__ import annotations
 
 import json
@@ -12,14 +13,8 @@ from ...adapters.llm.deepseek import ProviderResponse, StructuredOutputProvider
 from ...api.dto import ChartResultDTO, ClaimDTO, StructuredAnalysisDTO, ValidationResultDTO
 from ...domain.pillars import Branch, FourPillars, Pillar, Stem
 from ...domain.rules.relations import evaluate_relations
-from ..rag.models import EvidenceRetriever, RetrievalChannel, RetrievalPlan, RetrievedEvidence
+from ..rag.models import RetrievedEvidence
 from .context import build_analysis_context
-from .professional import (
-    PROFESSIONAL_RUBRIC,
-    balanced_queries,
-    reflection_feedback,
-    reflection_requires_revision,
-)
 from .prompts import (
     INTERPRETER_PROMPT_VERSION,
     INTERPRETER_SYSTEM_PROMPT,
@@ -27,7 +22,7 @@ from .prompts import (
     LOCAL_REPAIR_SYSTEM_PROMPT,
 )
 from .report import ReportAssembler
-from .verifier import verify_analysis
+from .verifier import build_programmatic_reflection, verify_analysis
 
 
 class AnalysisPipelineError(RuntimeError):
@@ -51,20 +46,26 @@ _RELATION_LABELS = {
     "punishment": "相刑",
 }
 _REVISION_GUIDANCE = {
-    "UNKNOWN_FACT": "fact_ids 只能使用 allowed_reference_ids.fact_ids 中的确定性事实 ID。",
-    "UNKNOWN_RULE": "rule_ids 只能使用 allowed_reference_ids.rule_ids 中的确定性规则或 A/B 级证据 ID。",
-    "UNKNOWN_EVIDENCE": "evidence_ids 只能使用 allowed_reference_ids.evidence_ids 中的已检索证据 ID。",
-    "MISSING_INTERPRETIVE_SUPPORT": "为该 claim 补充 allowed_reference_ids 中真实存在的 rule_id/evidence_id；若无可用支撑，删除该 claim。",
-    "NON_AUTHORITATIVE_RULE": "C 级案例只能作为 evidence_ids；rule_ids 只能引用确定性规则或 A/B 级证据。",
-    "SCHOOL_MISMATCH": "analysis.school 必须逐字等于 analysis_profile.school；methodology_priority 不是 school 的可选值。",
-    "CLAIM_SCHOOL_MISMATCH": "claim.school 应省略，或逐字等于 analysis_profile.school；不得填写 methodology_priority。",
+    "UNKNOWN_FACT": "删除或改用 analysis_context 中真实存在的确定性 fact_id。",
+    "UNKNOWN_RULE": "删除或改用 analysis_context 中真实存在的确定性 rule_id。",
+    "EVIDENCE_DISABLED": "RAG 已关闭；删除 evidence_ids，不得使用外部证据 ID。",
+    "SCHOOL_MISMATCH": "analysis.school 必须逐字等于 analysis_profile.school。",
+    "CLAIM_SCHOOL_MISMATCH": "claim.school 应省略，或逐字等于 analysis_profile.school。",
     "POLICY_HIGH_RISK_ASSERTION": "改为条件、趋势和风险提示。",
-    "MISSING_KINSHIP_ASSESSMENT": "补全父亲、母亲、兄弟姐妹、配偶婚恋、子女和家庭互动六项，逐项结合六亲星、宫位与岁运触发。",
+    "TEN_GOD_MISMATCH": "按日主与目标天干的确定性十神映射重写相关块。",
+    "INVALID_HIDDEN_STEM": "按地支确定性藏干表重写相关块。",
+    "INVALID_ELEMENT_RELATION": "修正五行生克方向，并同步修正由此产生的解释。",
+    "INVALID_STEM_RELATION": "修正天干五合或天干冲的参与者，并与 analysis_context 的确定性关系一致。",
+    "INVALID_BRANCH_RELATION": "修正六合、冲、刑、害、破、半合半会、拱合拱会或暗合类型。",
+    "INVALID_BRANCH_GROUP_RELATION": "修正三合、三会或三刑的完整三支组合。",
+    "INVALID_PILLAR_RELATION": "修正伏吟、反吟、天克地冲或天合地合的干支条件。",
+    "INVALID_INTERNAL_PILLAR_RELATION": "按干支五行方向修正盖头或截脚判断。",
+    "MISSING_KINSHIP_ASSESSMENT": "补全父亲、母亲、兄弟姐妹、配偶婚恋、子女和家庭互动六项。",
     "MISSING_HEALTH_ASSESSMENT": "补全五行偏性、寒暖燥湿、传统脏腑象义、保护因素、大运变化和生活建议六项。",
-    "INCOMPLETE_DAYUN_ASSESSMENT": "从出生至起运开始，并按 dayun_table 原顺序逐柱补全全部大运。",
+    "INCOMPLETE_DAYUN_ASSESSMENT": "补全出生至起运和 analysis_context.temporal_hierarchy.dayun_sequence 中每一步大运。",
 }
 
-_REPAIRABLE_FIELDS = frozenset(
+_REPAIRABLE_ROOTS = frozenset(
     {
         "executive_summary",
         "reasoning_summary",
@@ -74,111 +75,363 @@ _REPAIRABLE_FIELDS = frozenset(
         "health_assessment",
         "dayun_assessment",
         "claims",
-        "reflection",
         "limitations",
     }
 )
 
 
-def _repair_targets(
-    analysis: StructuredAnalysisDTO, validation: ValidationResultDTO
-) -> set[str]:
-    targets: set[str] = set()
+def _json_pointer_parts(path: str) -> list[str]:
+    return [part.replace("~1", "/").replace("~0", "~") for part in path.split("/")[1:]]
+
+
+def _repair_unit(path: str) -> str | None:
+    parts = _json_pointer_parts(path)
+    if not parts or parts[0] not in _REPAIRABLE_ROOTS:
+        return None
+    root = parts[0]
+    if (
+        root
+        in {
+            "reasoning_summary",
+            "temporal_assessment",
+            "kinship_assessment",
+            "health_assessment",
+            "dayun_assessment",
+            "claims",
+        }
+        and len(parts) >= 2
+        and parts[1].isdigit()
+    ):
+        return f"/{root}/{parts[1]}"
+    return f"/{root}"
+
+
+def _claim_path(analysis: StructuredAnalysisDTO, claim_id: str) -> str | None:
+    for index, claim in enumerate(analysis.claims):
+        if claim.claim_id == claim_id:
+            return f"/claims/{index}"
+    return None
+
+
+def _repair_paths(analysis: StructuredAnalysisDTO, validation: ValidationResultDTO) -> set[str]:
+    paths: set[str] = set()
     for error in validation.errors:
         code = str(error.get("code", ""))
+        explicit_path = str(error.get("path", "")).strip()
+        if explicit_path:
+            unit = _repair_unit(explicit_path)
+            if unit:
+                paths.add(unit)
+                continue
+        claim_id = str(error.get("claim_id", "")).strip()
+        if claim_id:
+            claim_path = _claim_path(analysis, claim_id)
+            if claim_path:
+                paths.add(claim_path)
+                continue
         if code == "MISSING_KINSHIP_ASSESSMENT":
-            targets.add("kinship_assessment")
+            paths.add("/kinship_assessment")
         elif code == "MISSING_HEALTH_ASSESSMENT":
-            targets.add("health_assessment")
+            paths.add("/health_assessment")
         elif code == "INCOMPLETE_DAYUN_ASSESSMENT":
-            targets.add("dayun_assessment")
-        elif error.get("claim_id") or code in {
-            "UNKNOWN_FACT",
-            "UNKNOWN_RULE",
-            "UNKNOWN_EVIDENCE",
-            "MISSING_INTERPRETIVE_SUPPORT",
-            "NON_AUTHORITATIVE_RULE",
-            "CLAIM_SCHOOL_MISMATCH",
-            "POLICY_HIGH_RISK_ASSERTION",
-        }:
-            targets.add("claims")
-        elif code == "SCHOOL_MISMATCH":
-            # The immutable school field is repaired by a full rewrite because it is
-            # intentionally not exposed as a patchable semantic section.
+            paths.add("/dayun_assessment")
+        elif code in {"SCHOOL_MISMATCH", "CHART_ID_MISMATCH", "CHART_NOT_VALIDATED"}:
             return set()
-
-    reflection = analysis.reflection
-    if reflection is not None and reflection.status == "revise":
-        reflection_text = " ".join(
-            [
-                *reflection.missing_dimensions,
-                *reflection.contradictions,
-                *reflection.revision_instructions,
-            ]
-        )
-        keyword_targets = {
-            "六亲": "kinship_assessment",
-            "父母": "kinship_assessment",
-            "婚恋": "kinship_assessment",
-            "健康": "health_assessment",
-            "脏腑": "health_assessment",
-            "大运": "dayun_assessment",
-            "岁运": "temporal_assessment",
-            "格局": "structure_assessment",
-            "喜用": "structure_assessment",
-            "强弱": "structure_assessment",
-            "摘要": "executive_summary",
-            "推理": "reasoning_summary",
-            "引用": "claims",
-        }
-        mapped_reflection_targets = {
-            field_name
-            for keyword, field_name in keyword_targets.items()
-            if keyword in reflection_text
-        }
-        if reflection_text.strip() and not mapped_reflection_targets:
-            return set()
-        targets.update(mapped_reflection_targets)
-        if targets:
-            targets.add("reflection")
-    return targets & _REPAIRABLE_FIELDS
+    return paths
 
 
-def _local_repair_schema(
-    analysis_schema: dict[str, Any], targets: set[str]
-) -> dict[str, Any]:
-    source_properties = analysis_schema.get("properties", {})
-    replacement_properties = {
-        name: source_properties[name]
-        for name in sorted(targets)
-        if isinstance(source_properties, dict) and name in source_properties
-    }
+def _get_pointer(document: object, path: str) -> object:
+    current = document
+    for part in _json_pointer_parts(path):
+        if isinstance(current, dict):
+            current = current[part]
+        elif isinstance(current, list):
+            current = current[int(part)]
+        else:
+            raise KeyError(path)
+    return current
+
+
+def _replace_pointer(document: object, path: str, value: object) -> None:
+    parts = _json_pointer_parts(path)
+    if not parts:
+        raise KeyError(path)
+    current = document
+    for part in parts[:-1]:
+        if isinstance(current, dict):
+            current = current[part]
+        elif isinstance(current, list):
+            current = current[int(part)]
+        else:
+            raise KeyError(path)
+    leaf = parts[-1]
+    if isinstance(current, dict):
+        current[leaf] = value
+    elif isinstance(current, list):
+        current[int(leaf)] = value
+    else:
+        raise KeyError(path)
+
+
+def _remove_pointer(document: object, path: str) -> None:
+    parts = _json_pointer_parts(path)
+    if not parts:
+        raise KeyError(path)
+    current = document
+    for part in parts[:-1]:
+        if isinstance(current, dict):
+            current = current[part]
+        elif isinstance(current, list):
+            current = current[int(part)]
+        else:
+            raise KeyError(path)
+    leaf = parts[-1]
+    if isinstance(current, dict):
+        current.pop(leaf, None)
+    elif isinstance(current, list):
+        current.pop(int(leaf))
+    else:
+        raise KeyError(path)
+
+
+def _local_repair_schema(paths: set[str]) -> dict[str, Any]:
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$id": "analysis-repair-v1",
+        "$id": "analysis-json-patch-v2",
         "type": "object",
         "additionalProperties": False,
-        "required": [
-            "schema_version",
-            "replacement_fields",
-            "remove_claim_ids",
-            "repair_summary",
-        ],
+        "required": ["schema_version", "operations", "repair_summary"],
         "properties": {
-            "schema_version": {"const": "analysis-repair-v1"},
-            "replacement_fields": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": sorted(replacement_properties),
-                "properties": replacement_properties,
-            },
-            "remove_claim_ids": {
+            "schema_version": {"const": "analysis-json-patch-v2"},
+            "operations": {
                 "type": "array",
-                "items": {"type": "string"},
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["op", "path"],
+                    "properties": {
+                        "op": {"enum": ["replace", "remove"]},
+                        "path": {"enum": sorted(paths)},
+                        "value": {},
+                    },
+                },
             },
             "repair_summary": {"type": "string"},
         },
     }
+
+
+def _compact_global_state(candidate: dict[str, Any]) -> dict[str, Any]:
+    structure = candidate.get("structure_assessment")
+    if isinstance(structure, dict):
+        compact_structure = {
+            key: structure[key]
+            for key in (
+                "day_master_strength",
+                "wang_xiang_xiu_qiu_si",
+                "pattern",
+                "useful_gods",
+                "climate_adjustment",
+            )
+            if key in structure
+        }
+    else:
+        compact_structure = {}
+    return {
+        "school": candidate.get("school"),
+        "structure_assessment": compact_structure,
+        "executive_summary_anchor": candidate.get("executive_summary"),
+    }
+
+
+def _collect_ids(value: object, key: str) -> set[str]:
+    result: set[str] = set()
+    if isinstance(value, dict):
+        for name, child in value.items():
+            if name == key and isinstance(child, list):
+                result.update(str(item) for item in child if item)
+            else:
+                result.update(_collect_ids(child, key))
+    elif isinstance(value, list | tuple):
+        for child in value:
+            result.update(_collect_ids(child, key))
+    return result
+
+
+def _project_natal_core(
+    natal: dict[str, Any], *, roots: set[str], predicates: set[str]
+) -> dict[str, Any]:
+    keys = {"day_master", "pillars", "basic"}
+    if roots & {
+        "structure_assessment",
+        "health_assessment",
+        "executive_summary",
+        "reasoning_summary",
+        "claims",
+    }:
+        keys.add("five_elements")
+    if roots & {
+        "kinship_assessment",
+        "structure_assessment",
+        "executive_summary",
+        "reasoning_summary",
+        "claims",
+    } or any(predicate.startswith("branch_") for predicate in predicates):
+        keys.add("natal_relations")
+    if roots & {"kinship_assessment", "health_assessment"}:
+        keys.add("shensha")
+    return {key: natal[key] for key in keys if key in natal}
+
+
+def _dayun_outline(item: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "index",
+        "start_year",
+        "end_year",
+        "start_age",
+        "end_age",
+        "ganzhi",
+        "stem_ten_god",
+        "branch_ten_god",
+        "fact_id",
+        "rule_id",
+    )
+    return {key: item[key] for key in keys if key in item}
+
+
+def _target_dayun_window(
+    sequence: list[dict[str, Any]], current_blocks: dict[str, object]
+) -> list[dict[str, Any]]:
+    fact_ids = _collect_ids(current_blocks, "fact_ids")
+    text = json.dumps(current_blocks, ensure_ascii=False, default=str)
+    matches = [
+        index
+        for index, item in enumerate(sequence)
+        if (item.get("fact_id") and str(item["fact_id"]) in fact_ids)
+        or (item.get("ganzhi") and str(item["ganzhi"]) in text)
+    ]
+    if not matches:
+        return [_dayun_outline(item) for item in sequence]
+    indexes: set[int] = set()
+    for index in matches:
+        indexes.update(item for item in (index - 1, index, index + 1) if 0 <= item < len(sequence))
+    return [
+        sequence[index] if index in matches else _dayun_outline(sequence[index])
+        for index in sorted(indexes)
+    ]
+
+
+def _consistency_neighbors(
+    candidate: dict[str, Any], roots: set[str], paths: set[str]
+) -> dict[str, Any]:
+    neighbors: dict[str, Any] = {}
+    if "executive_summary" not in roots and roots & {
+        "structure_assessment",
+        "temporal_assessment",
+        "kinship_assessment",
+        "health_assessment",
+        "dayun_assessment",
+        "reasoning_summary",
+    }:
+        neighbors["/executive_summary"] = candidate.get("executive_summary")
+
+    keywords_by_root = {
+        "structure_assessment": ("强弱", "格局", "喜用", "调候", "结构"),
+        "temporal_assessment": ("岁运", "流年", "流月", "流日", "大运"),
+        "kinship_assessment": ("六亲", "父", "母", "兄弟", "配偶", "婚恋", "子女"),
+        "health_assessment": ("健康", "寒暖", "燥湿", "脏腑", "五行偏性"),
+        "dayun_assessment": ("大运", "起运", "生命周期"),
+    }
+    requested = {keyword for root in roots for keyword in keywords_by_root.get(root, ())}
+    reasoning = candidate.get("reasoning_summary")
+    if requested and isinstance(reasoning, list) and "/reasoning_summary" not in paths:
+        selected = [
+            item
+            for item in reasoning
+            if isinstance(item, dict)
+            and any(keyword in json.dumps(item, ensure_ascii=False) for keyword in requested)
+        ]
+        if selected:
+            neighbors["/reasoning_summary:related"] = selected[:4]
+    return {key: value for key, value in neighbors.items() if value not in (None, "", [], {})}
+
+
+def _project_repair_context(
+    *,
+    base_context: dict[str, Any],
+    paths: set[str],
+    errors: list[dict[str, Any]],
+    current_blocks: dict[str, object],
+) -> dict[str, Any]:
+    roots = {parts[0] for path in paths if (parts := _json_pointer_parts(path))}
+    predicates = {
+        str(error.get("assertion", {}).get("predicate", ""))
+        for error in errors
+        if isinstance(error.get("assertion"), dict)
+    }
+    context: dict[str, Any] = {
+        "context_version": base_context.get("context_version"),
+        "context_policy": base_context.get("context_policy"),
+    }
+    natal = base_context.get("natal_core")
+    if isinstance(natal, dict):
+        context["natal_core"] = _project_natal_core(natal, roots=roots, predicates=predicates)
+
+    referenced_fact_ids = _collect_ids(current_blocks, "fact_ids")
+    catalog = base_context.get("fact_catalog")
+    if isinstance(catalog, list):
+        selected_catalog = [
+            item
+            for item in catalog
+            if isinstance(item, dict) and str(item.get("fact_id", "")) in referenced_fact_ids
+        ]
+        if selected_catalog:
+            context["fact_catalog"] = selected_catalog
+
+    temporal = base_context.get("temporal_hierarchy")
+    if isinstance(temporal, dict):
+        projected: dict[str, Any] = {}
+        if "hierarchy" in temporal:
+            projected["hierarchy"] = temporal["hierarchy"]
+        if roots & {"dayun_assessment", "temporal_assessment"}:
+            if "qiyun" in temporal:
+                projected["qiyun"] = temporal["qiyun"]
+            sequence_raw = temporal.get("dayun_sequence")
+            sequence = (
+                [item for item in sequence_raw if isinstance(item, dict)]
+                if isinstance(sequence_raw, list)
+                else []
+            )
+            if sequence:
+                if any(path.startswith("/dayun_assessment/") for path in paths):
+                    projected["dayun_window"] = _target_dayun_window(sequence, current_blocks)
+                else:
+                    projected["dayun_sequence"] = sequence
+        elif roots & {"health_assessment", "kinship_assessment"}:
+            if "qiyun" in temporal:
+                projected["qiyun"] = temporal["qiyun"]
+            sequence_raw = temporal.get("dayun_sequence")
+            if isinstance(sequence_raw, list):
+                projected["dayun_outline"] = [
+                    _dayun_outline(item) for item in sequence_raw if isinstance(item, dict)
+                ]
+        for key in ("active_dayun", "target_liunian", "selected_liuyue", "selected_liuri"):
+            if key in temporal and roots & {
+                "temporal_assessment",
+                "kinship_assessment",
+                "health_assessment",
+                "reasoning_summary",
+                "executive_summary",
+                "claims",
+            }:
+                projected[key] = temporal[key]
+        if len(projected) > 1:
+            context["temporal_hierarchy"] = projected
+
+    if predicates:
+        context["rule_checks_needed"] = sorted(predicates)
+    return context
 
 
 def _build_local_repair_payload(
@@ -186,33 +439,38 @@ def _build_local_repair_payload(
     base_payload: dict[str, Any],
     analysis: StructuredAnalysisDTO,
     validation: ValidationResultDTO,
-    targets: set[str],
+    paths: set[str],
 ) -> dict[str, Any]:
     candidate = analysis.model_dump(mode="json")
+    relevant_errors = [
+        error
+        for error in validation.errors
+        if not error.get("path")
+        or _repair_unit(str(error.get("path"))) in paths
+        or _claim_path(analysis, str(error.get("claim_id", ""))) in paths
+    ]
+    current_blocks = {path: _get_pointer(candidate, path) for path in sorted(paths)}
+    roots = {parts[0] for path in paths if (parts := _json_pointer_parts(path))}
     return {
         "chart_id": base_payload["chart_id"],
-        "analysis_context": base_payload["analysis_context"],
-        "retrieval_context": base_payload["retrieval_context"],
-        "retrieval_policy": base_payload["retrieval_policy"],
         "analysis_profile": base_payload["analysis_profile"],
-        "allowed_reference_ids": base_payload["allowed_reference_ids"],
-        "core_topic_contract": base_payload["core_topic_contract"],
         "user_focus": base_payload["user_focus"],
-        "repair_targets": sorted(targets),
-        "global_analysis_state": {
-            "executive_summary": candidate.get("executive_summary"),
-            "reasoning_summary": candidate.get("reasoning_summary", []),
-            "structure_assessment": candidate.get("structure_assessment"),
-            "temporal_assessment": candidate.get("temporal_assessment", []),
-        },
-        "candidate_analysis": candidate,
-        "validation_errors": validation.errors,
-        "required_revisions": validation.required_revisions,
+        "repair_mode": "minimal_dependency_closure",
+        "allowed_paths": sorted(paths),
+        "current_blocks": current_blocks,
+        "global_analysis_state": _compact_global_state(candidate),
+        "consistency_neighbors": _consistency_neighbors(candidate, roots, paths),
+        "relevant_context": _project_repair_context(
+            base_context=base_payload["analysis_context"],
+            paths=paths,
+            errors=relevant_errors,
+            current_blocks=current_blocks,
+        ),
+        "validation_errors": relevant_errors,
         "revision_guidance": [
-            _REVISION_GUIDANCE.get(code, code)
-            for code in validation.required_revisions
+            _REVISION_GUIDANCE.get(str(error.get("code", "")), str(error.get("code", "")))
+            for error in relevant_errors
         ],
-        "reflection_feedback": reflection_feedback(analysis),
     }
 
 
@@ -220,56 +478,42 @@ def _apply_local_repair(
     *,
     analysis: StructuredAnalysisDTO,
     repair_payload: dict[str, Any],
-    targets: set[str],
+    paths: set[str],
 ) -> dict[str, Any]:
-    allowed_top_level = {
-        "schema_version",
-        "replacement_fields",
-        "remove_claim_ids",
-        "repair_summary",
-    }
-    if set(repair_payload) - allowed_top_level:
-        raise AnalysisPipelineError(
-            "provider added fields outside the local repair contract",
-            safe_details={"required_revisions": ["LOCAL_REPAIR_SCOPE_VIOLATION"]},
-        )
-    if repair_payload.get("schema_version") != "analysis-repair-v1":
+    if repair_payload.get("schema_version") != "analysis-json-patch-v2":
         raise AnalysisPipelineError(
             "provider output violates local repair schema",
             safe_details={"required_revisions": ["LOCAL_REPAIR_SCHEMA_INVALID"]},
         )
-    replacements = repair_payload.get("replacement_fields")
-    if not isinstance(replacements, dict) or not targets <= set(replacements):
+    operations = repair_payload.get("operations")
+    if not isinstance(operations, list) or not operations:
         raise AnalysisPipelineError(
-            "provider omitted requested local repair fields",
-            safe_details={
-                "required_revisions": ["LOCAL_REPAIR_FIELDS_MISSING"],
-                "repair_targets": sorted(targets),
-            },
-        )
-    if set(replacements) - targets:
-        raise AnalysisPipelineError(
-            "provider attempted to modify frozen report fields",
-            safe_details={"required_revisions": ["LOCAL_REPAIR_SCOPE_VIOLATION"]},
+            "provider omitted local repair operations",
+            safe_details={"required_revisions": ["LOCAL_REPAIR_FIELDS_MISSING"]},
         )
     merged = analysis.model_dump(mode="json")
-    for field_name, value in replacements.items():
-        merged[field_name] = value
-    remove_ids_raw = repair_payload.get("remove_claim_ids", [])
-    remove_ids = (
-        {str(item) for item in remove_ids_raw}
-        if isinstance(remove_ids_raw, list)
-        else set()
-    )
-    if remove_ids:
-        claims = merged.get("claims", [])
-        if isinstance(claims, list):
-            merged["claims"] = [
-                claim
-                for claim in claims
-                if not isinstance(claim, dict)
-                or str(claim.get("claim_id", "")) not in remove_ids
-            ]
+    touched: set[str] = set()
+    for operation in operations:
+        if not isinstance(operation, dict):
+            raise AnalysisPipelineError("invalid local repair operation")
+        path = str(operation.get("path", ""))
+        if path not in paths:
+            raise AnalysisPipelineError(
+                "provider attempted to modify frozen report fields",
+                safe_details={"required_revisions": ["LOCAL_REPAIR_SCOPE_VIOLATION"]},
+            )
+        op = str(operation.get("op", ""))
+        if op == "replace":
+            if "value" not in operation:
+                raise AnalysisPipelineError("replace operation requires value")
+            _replace_pointer(merged, path, operation["value"])
+        elif op == "remove":
+            _remove_pointer(merged, path)
+        else:
+            raise AnalysisPipelineError("unsupported local repair operation")
+        touched.add(path)
+    if not touched:
+        raise AnalysisPipelineError("local repair changed no fields")
     return merged
 
 
@@ -309,24 +553,9 @@ def _shensha(chart: ChartResultDTO) -> list[dict[str, Any]]:
     return [dict(item) for item in raw if isinstance(item, dict)]
 
 
-def _serialize(item: RetrievedEvidence) -> dict[str, Any]:
-    return {
-        "evidence_id": item.chunk_id,
-        "source_id": item.source_id,
-        "content": item.content,
-        "citation": item.citation,
-        "channel": item.channel.value,
-        "collection": item.collection,
-        "trust_tier": item.trust_tier,
-        "permissions": {
-            "can_support_claim": item.can_support_claim,
-            "can_support_case_analogy": item.can_support_case_analogy,
-            "can_supply_explanation": item.can_supply_explanation,
-        },
-    }
-
-
-def _discard_malformed_claims(payload: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def _discard_malformed_claims(
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Drop individual untraceable claims without discarding an otherwise valid analysis."""
     claims = payload.get("claims")
     if not isinstance(claims, list):
@@ -342,10 +571,15 @@ def _discard_malformed_claims(payload: dict[str, Any]) -> tuple[dict[str, Any], 
             # These reference lists are allowed to be empty. Some providers omit
             # an empty array even when the JSON schema marks the field required.
             # Supplying [] preserves the meaning and never invents a citation.
-            for field in ("rule_ids", "evidence_ids"):
-                if field not in candidate:
-                    candidate[field] = []
-                    defaulted_fields.append(field)
+            if candidate.get("rule_ids") or "rule_ids" not in candidate:
+                candidate["rule_ids"] = []
+                defaulted_fields.append("rule_ids")
+            # RAG is disabled for reports.  Normalize legacy/provider-created
+            # evidence references to the only valid value instead of spending a
+            # repair call on a field with no remaining semantics.
+            if candidate.get("evidence_ids") or "evidence_ids" not in candidate:
+                candidate["evidence_ids"] = []
+                defaulted_fields.append("evidence_ids")
         try:
             claim = ClaimDTO.model_validate(candidate)
         except ValueError as exc:
@@ -413,39 +647,34 @@ def _walk_dicts(value: object) -> Iterator[dict[str, Any]]:
             yield from _walk_dicts(child)
 
 
-def _reference_catalog(
-    context: dict[str, Any], evidence: tuple[RetrievedEvidence, ...]
-) -> dict[str, list[str]]:
-    """Expose exactly the identifiers that the deterministic validator can accept."""
-    fact_ids: set[str] = set()
-    deterministic_rule_ids: set[str] = set()
-    for item in _walk_dicts(context):
-        fact_id = item.get("fact_id")
-        rule_id = item.get("rule_id")
-        if fact_id:
-            fact_ids.add(str(fact_id))
-        if rule_id:
-            deterministic_rule_ids.add(str(rule_id))
-
-    authoritative_evidence_ids = {
-        item.chunk_id
-        for item in evidence
-        if item.can_support_claim and item.trust_tier in {"A", "B"}
-    }
-    return {
-        "fact_ids": sorted(fact_ids),
-        "rule_ids": sorted(deterministic_rule_ids | authoritative_evidence_ids),
-        "evidence_ids": sorted(item.chunk_id for item in evidence),
-    }
-
-
 def _substantive_items(items: list[dict[str, Any]]) -> int:
-    keys = {"conclusion", "summary", "analysis", "statement", "title", "relation", "dimension", "stage"}
-    return sum(
-        1
-        for item in items
-        if any(str(item.get(key, "")).strip() for key in keys)
-    )
+    keys = {
+        "conclusion",
+        "summary",
+        "analysis",
+        "statement",
+        "title",
+        "relation",
+        "dimension",
+        "stage",
+        "period",
+        "system",
+        "finding",
+        "strength",
+        "risk",
+        "protection",
+        "advice",
+    }
+    return sum(1 for item in items if any(str(item.get(key, "")).strip() for key in keys))
+
+
+def _dayun_item_identity(item: dict[str, Any]) -> tuple[set[str], str]:
+    fact_ids_raw = item.get("fact_ids", [])
+    fact_ids = {str(value) for value in fact_ids_raw} if isinstance(fact_ids_raw, list) else set()
+    stage = " ".join(
+        str(item.get(key, "")) for key in ("stage", "period", "title", "ganzhi")
+    ).casefold()
+    return fact_ids, stage
 
 
 def _enforce_core_topic_coverage(
@@ -454,17 +683,14 @@ def _enforce_core_topic_coverage(
     analysis: StructuredAnalysisDTO,
     validation: ValidationResultDTO,
 ) -> ValidationResultDTO:
-    """Fail the report gate when the three core topics are materially incomplete.
-
-    Prompt instructions alone are not sufficient for core product capabilities.  This
-    check feeds omissions back into the existing revision loop and prevents a formally
-    successful report from silently dropping 六亲、健康或任一步大运。
-    """
+    """Protect the three core product capabilities without judging interpretations."""
     errors = list(validation.errors)
+    warnings = list(validation.warnings)
     if _substantive_items(analysis.kinship_assessment) < 6:
         errors.append(
             {
                 "code": "MISSING_KINSHIP_ASSESSMENT",
+                "path": "/kinship_assessment",
                 "detail": "kinship_assessment must contain six substantive relation groups",
             }
         )
@@ -472,27 +698,79 @@ def _enforce_core_topic_coverage(
         errors.append(
             {
                 "code": "MISSING_HEALTH_ASSESSMENT",
+                "path": "/health_assessment",
                 "detail": "health_assessment must contain six substantive dimensions",
             }
         )
-    expected_dayun_items = 1 + len(chart.dayun or [])
-    if _substantive_items(analysis.dayun_assessment) < expected_dayun_items:
+
+    identities = [_dayun_item_identity(item) for item in analysis.dayun_assessment]
+    qiyun_hits = [
+        index
+        for index, (_, stage) in enumerate(identities)
+        if "出生至起运" in stage or "起运前" in stage or "birth" in stage or "qiyun" in stage
+    ]
+    missing: list[str] = []
+    duplicate: list[str] = []
+    if chart.dayun:
+        if not qiyun_hits:
+            missing.append("birth_to_qiyun")
+        elif len(qiyun_hits) > 1:
+            duplicate.append("birth_to_qiyun")
+    elif not analysis.dayun_assessment:
+        warnings.append(
+            {
+                "code": "DAYUN_DATA_UNAVAILABLE",
+                "path": "/dayun_assessment",
+                "detail": "缺少可核验出生日期或大运数据，允许留空并在 limitations 说明",
+            }
+        )
+
+    for expected in chart.dayun or []:
+        fact_id = str(expected.get("fact_id", ""))
+        ganzhi = str(expected.get("ganzhi", "")).casefold()
+        matches = [
+            index
+            for index, (fact_ids, stage) in enumerate(identities)
+            if (fact_id and fact_id in fact_ids) or (ganzhi and ganzhi in stage)
+        ]
+        label = fact_id or ganzhi
+        if not matches:
+            missing.append(label)
+        elif len(matches) > 1:
+            duplicate.append(label)
+
+    if missing or duplicate:
         errors.append(
             {
                 "code": "INCOMPLETE_DAYUN_ASSESSMENT",
-                "detail": (
-                    "dayun_assessment must cover birth-to-qiyun and every deterministic "
-                    f"dayun item; expected at least {expected_dayun_items}"
-                ),
+                "path": "/dayun_assessment",
+                "detail": "dayun stages must uniquely cover birth-to-qiyun and every deterministic period",
+                "missing_stages": missing,
+                "duplicate_stages": duplicate,
             }
         )
-    if len(errors) == len(validation.errors):
+
+    theme_keywords = ("事业", "财", "感情", "六亲", "健康", "承接", "结构")
+    for index, item in enumerate(analysis.dayun_assessment):
+        text = " ".join(str(value) for value in item.values())
+        if index not in qiyun_hits and sum(keyword in text for keyword in theme_keywords) < 3:
+            warnings.append(
+                {
+                    "code": "DAYUN_THEME_COVERAGE_WEAK",
+                    "path": f"/dayun_assessment/{index}",
+                    "detail": "该阶段的事业、财运、感情六亲、健康或承接说明较少",
+                }
+            )
+
+    if len(errors) == len(validation.errors) and len(warnings) == len(validation.warnings):
         return validation
+    status = "failed" if errors else "passed"
     return validation.model_copy(
         update={
-            "status": "failed",
+            "status": status,
             "errors": errors,
-            "approved_claim_ids": [],
+            "warnings": warnings,
+            "approved_claim_ids": validation.approved_claim_ids if status == "passed" else [],
             "required_revisions": sorted(
                 {str(error.get("code", "VALIDATION_ERROR")) for error in errors}
             ),
@@ -512,13 +790,14 @@ def _supplement_deterministic_dayun_stages(
     searchable_stages = [str(item.get("stage", "")).casefold() for item in items]
     additions: list[dict[str, Any]] = []
     if not any(
-        "起运" in stage or "qiyun" in stage or "birth" in stage
-        for stage in searchable_stages
+        "起运" in stage or "qiyun" in stage or "birth" in stage for stage in searchable_stages
     ):
         additions.append(
             {
                 "stage": "出生至起运",
                 "conclusion": "仅列示确定性起运前阶段；扩展解读未通过校验，暂不作趋势断言。",
+                "coverage_status": "deterministic_fallback",
+                "interpretation_status": "missing",
                 "fact_ids": [],
                 "rule_ids": [],
                 "evidence_ids": [],
@@ -539,6 +818,8 @@ def _supplement_deterministic_dayun_stages(
             {
                 "stage": f"{ganzhi}大运（{start_year}—{end_year}）",
                 "conclusion": "仅列示确定性排盘阶段；扩展解读未通过校验，暂不作趋势断言。",
+                "coverage_status": "deterministic_fallback",
+                "interpretation_status": "missing",
                 "fact_ids": [str(item["fact_id"])] if item.get("fact_id") else [],
                 "rule_ids": [str(item["rule_id"])] if item.get("rule_id") else [],
                 "evidence_ids": [],
@@ -573,9 +854,7 @@ def _salvage(
     remaining = [claim for claim in analysis.claims if claim.claim_id not in rejected]
     if rejected and remaining:
         limitations = list(cleaned.limitations)
-        limitations.append(
-            f"已移除 {len(rejected)} 条未通过确定性引用校验的模型结论。"
-        )
+        limitations.append(f"已移除 {len(rejected)} 条未通过确定性引用校验的模型结论。")
         cleaned = cleaned.model_copy(update={"claims": remaining, "limitations": limitations})
 
     if "INCOMPLETE_DAYUN_ASSESSMENT" in validation.required_revisions:
@@ -608,9 +887,8 @@ class AnalysisPipelineResult:
 
 
 class AnalysisPipeline:
-    def __init__(self, *, provider: StructuredOutputProvider, retriever: EvidenceRetriever) -> None:
+    def __init__(self, *, provider: StructuredOutputProvider) -> None:
         self.provider = provider
-        self.retriever = retriever
         self.report_assembler = ReportAssembler()
 
     def run(  # noqa: PLR0915
@@ -628,7 +906,7 @@ class AnalysisPipeline:
         if not user_focus or len(user_focus) > 8:
             raise AnalysisPipelineError("user_focus must contain 1 to 8 topics")
 
-        trace_id = f"retrieval_{uuid.uuid4().hex[:12]}"
+        trace_id = f"analysis_{uuid.uuid4().hex[:12]}"
         relations = _relations(chart)
         shensha = _shensha(chart)
         context = build_analysis_context(
@@ -636,19 +914,7 @@ class AnalysisPipeline:
             computed_relations=relations,
             computed_shensha=shensha,
         )
-        plan = RetrievalPlan(
-            queries=balanced_queries(chart, relations, shensha, user_focus),
-            school=school,
-            task_type="interpretation",
-            top_k=20,
-            case_top_k=4,
-            explanation_top_k=6,
-        )
-        if on_stage:
-            on_stage("retrieving")
-        evidence = self.retriever.retrieve(plan)
-        if not evidence:
-            raise AnalysisPipelineError("approved evidence is required")
+        evidence: tuple[RetrievedEvidence, ...] = ()
 
         schema_path = (
             Path(__file__).resolve().parents[4]
@@ -657,61 +923,32 @@ class AnalysisPipeline:
             / "analysis_output.schema.json"
         )
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
-        grouped = {
-            channel.value: [
-                _serialize(item) for item in evidence if item.channel is channel
-            ]
-            for channel in RetrievalChannel
-        }
-        grouped["conflicting_evidence"] = []
-        allowed_reference_ids = _reference_catalog(context, evidence)
         payload: dict[str, Any] = {
             "chart_id": chart.chart_id,
             "calculation_profile_id": chart.calculation_profile_id,
             "analysis_context": context,
-            "retrieval_context": grouped,
-            "retrieval_policy": {
-                "deterministic_engine_overrides_rag": True,
-                "rule_claims_require_trust_tier": ["A", "B"],
-                "c_tier_is_explanation_or_historical_analogy_only": True,
-                "every_claim_requires_rule_or_evidence": True,
-            },
             "analysis_profile": {
                 "school": school,
-                "methodology_priority": "ziping_structure_first",
-                "supporting_methods": [
-                    "seasonal_strength",
-                    "tiao_hou",
-                    "pattern",
-                    "bing_yao",
-                    "tong_guan",
-                ],
+                "methodology": "ziping_structure_first_with_tiaohou_pattern_bingyao_tongguan",
                 "nayin_role": "secondary_only",
                 "shensha_role": "auxiliary_only",
             },
             "output_contract": {
-                "analysis_school_must_equal": school,
-                "claim_school": f"omit or exactly equal {school}",
-                "methodology_priority_is_not_school": True,
-                "unsupported_claim_action": "add a legal rule/evidence reference or delete the claim",
+                "schema": "analysis-output-v1",
+                "required_sections": [
+                    "executive_summary",
+                    "reasoning_summary",
+                    "structure_assessment",
+                    "kinship_assessment",
+                    "health_assessment",
+                    "dayun_assessment",
+                    "claims",
+                    "limitations",
+                ],
+                "claim_references": "fact_ids required; rule_ids and evidence_ids empty",
+                "reflection": "program_generated",
             },
-            "allowed_reference_ids": allowed_reference_ids,
-            "professional_rubric": PROFESSIONAL_RUBRIC,
             "user_focus": list(user_focus),
-            "core_topic_contract": {
-                "kinship_assessment": {
-                    "required_relations": ["father", "mother", "siblings", "spouse_relationship", "children", "family_dynamics"],
-                    "method": "ten_god_mapping + palace + exposure_roots + favorability + temporal_trigger",
-                },
-                "health_assessment": {
-                    "required_dimensions": ["element_bias", "cold_heat_dry_wet", "traditional_organs", "protective_factors", "dayun_changes", "lifestyle_advice"],
-                    "medical_boundary": "traditional tendency, not medical diagnosis",
-                },
-                "dayun_assessment": {
-                    "required_scope": "birth_to_qiyun_then_every_item_in_analysis_context.temporal.dayun_table",
-                    "themes_per_period": ["structure", "career", "wealth", "relationship_kinship", "health", "transition_to_next"],
-                },
-            },
         }
 
         response: ProviderResponse | None = None
@@ -725,7 +962,7 @@ class AnalysisPipeline:
         request_schema = schema
         request_system_prompt = INTERPRETER_SYSTEM_PROMPT
         request_prompt_version = INTERPRETER_PROMPT_VERSION
-        repair_targets: set[str] = set()
+        repair_paths: set[str] = set()
 
         for attempt in range(max_revisions + 1):
             if on_stage:
@@ -744,7 +981,7 @@ class AnalysisPipeline:
                 candidate_payload = _apply_local_repair(
                     analysis=analysis,
                     repair_payload=response.payload,
-                    targets=repair_targets,
+                    paths=repair_paths,
                 )
             else:
                 candidate_payload = response.payload
@@ -762,6 +999,14 @@ class AnalysisPipeline:
             validation = _enforce_core_topic_coverage(
                 chart=chart, analysis=analysis, validation=validation
             )
+            analysis = analysis.model_copy(
+                update={
+                    "reflection": build_programmatic_reflection(
+                        analysis=analysis, validation=validation
+                    )
+                }
+            )
+            candidate_payload = analysis.model_dump(mode="json")
             attempts.append(
                 {
                     "attempt": attempt + 1,
@@ -769,6 +1014,7 @@ class AnalysisPipeline:
                     "system_prompt": request_system_prompt,
                     "prompt_version": request_prompt_version,
                     "input_payload": request_payload,
+                    "output_schema": request_schema,
                     "model_output": response.payload,
                     "candidate_analysis_after_attempt": candidate_payload,
                     "provider_reasoning_content": response.reasoning_content,
@@ -784,22 +1030,21 @@ class AnalysisPipeline:
                     else None,
                 }
             )
-            reflection_failed = reflection_requires_revision(analysis)
-            if (validation.status == "passed" and not reflection_failed) or attempt == max_revisions:
+            if validation.status == "passed" or attempt == max_revisions:
                 break
             if on_stage:
                 on_stage("revision_pending")
 
-            repair_targets = _repair_targets(analysis, validation)
-            if repair_targets:
+            repair_paths = _repair_paths(analysis, validation)
+            if repair_paths:
                 request_kind = "local_repair"
                 request_payload = _build_local_repair_payload(
                     base_payload=payload,
                     analysis=analysis,
                     validation=validation,
-                    targets=repair_targets,
+                    paths=repair_paths,
                 )
-                request_schema = _local_repair_schema(schema, repair_targets)
+                request_schema = _local_repair_schema(repair_paths)
                 request_system_prompt = LOCAL_REPAIR_SYSTEM_PROMPT
                 request_prompt_version = LOCAL_REPAIR_PROMPT_VERSION
             else:
@@ -809,13 +1054,10 @@ class AnalysisPipeline:
                 request_kind = "full_revision"
                 request_payload = {
                     **payload,
-                    "previous_analysis": analysis.model_dump(mode="json"),
-                    "reflection_feedback": reflection_feedback(analysis),
-                    "required_revisions": validation.required_revisions,
+                    "request_kind": "full_revision_after_unscoped_failure",
                     "validation_errors": validation.errors,
                     "revision_guidance": [
-                        _REVISION_GUIDANCE.get(code, code)
-                        for code in validation.required_revisions
+                        _REVISION_GUIDANCE.get(code, code) for code in validation.required_revisions
                     ],
                 }
                 request_schema = schema
@@ -836,6 +1078,13 @@ class AnalysisPipeline:
             school=school,
             relations=relations,
         )
+        analysis = analysis.model_copy(
+            update={
+                "reflection": build_programmatic_reflection(
+                    analysis=analysis, validation=validation
+                )
+            }
+        )
         report = None
         if validation.status == "passed":
             if on_stage:
@@ -851,16 +1100,14 @@ class AnalysisPipeline:
             )
         generation_trace = {
             "trace_type": "report_analysis",
+            "analysis_trace_id": trace_id,
             "retrieval_trace_id": trace_id,
+            "rag_enabled": False,
             "prompt_version": primary_response.prompt_version,
             "model_id": primary_response.model_id,
             "system_prompt": INTERPRETER_SYSTEM_PROMPT,
-            "retrieval_plan": {
-                "queries": list(plan.queries),
-                "school": plan.school,
-                "task_type": plan.task_type,
-            },
-            "retrieved_evidence": [_serialize(item) for item in evidence],
+            # Every attempt retains its exact prompt and raw model payload, whether
+            # validation passed or failed.
             "attempts": attempts,
             "final_analysis": analysis.model_dump(mode="json"),
             "final_validation": validation.model_dump(mode="json"),

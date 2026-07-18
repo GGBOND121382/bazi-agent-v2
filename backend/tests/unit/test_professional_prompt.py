@@ -1,4 +1,5 @@
 """Professional prompt, immutable context and reflection regressions."""
+
 from __future__ import annotations
 
 import json
@@ -21,7 +22,12 @@ def _chart() -> ChartResultDTO:
         calendar={
             "deterministic_details": {
                 "basic": {"ren_yuan_commander": "丁火用事"},
-                "pillars": [{"position": "day", "ganzhi": "壬子"}],
+                "pillars": [
+                    {"position": "year", "ganzhi": "己卯"},
+                    {"position": "month", "ganzhi": "庚午"},
+                    {"position": "day", "ganzhi": "壬子"},
+                    {"position": "hour", "ganzhi": "丙午"},
+                ],
                 "five_elements": [{"element": "水", "total": 3}],
                 "shensha": [{"name": "羊刃", "target_position": "day"}],
             }
@@ -33,7 +39,11 @@ def _chart() -> ChartResultDTO:
             PillarDTO(position="hour", ganzhi="丙午", stem="丙", branch="午", nayin="天河水"),
         ],
         day_master="壬",
-        facts=[FactDTO(fact_id="FACT-DAY", fact_type="pillar", value="壬子", rule_id="RULE-DAY", inputs=[])],
+        facts=[
+            FactDTO(
+                fact_id="FACT-DAY", fact_type="pillar", value="壬子", rule_id="RULE-DAY", inputs=[]
+            )
+        ],
         qiyun={"start_years": 2, "start_months": 9, "start_days": 17},
         dayun=[{"ganzhi": "癸酉", "start_year": 2022, "end_year": 2031}],
         engine_versions=[EngineVersionDTO(engine="test", version="1", took_ms=0)],
@@ -68,15 +78,18 @@ def test_context_contains_read_only_natal_and_temporal_facts() -> None:
         computed_relations=[{"fact_id": "RELATION-01", "type": "clash"}],
         computed_shensha=[{"name": "羊刃", "target_position": "day"}],
     )
-    assert context["immutable"] is True
-    assert context["fact_authority"] == "deterministic_engine_only"
-    assert context["natal"]["pillars"][2]["ganzhi"] == "壬子"
-    assert context["natal"]["relations"][0]["fact_id"] == "RELATION-01"
-    assert context["temporal"]["dayun_table"][0]["ganzhi"] == "癸酉"
-    assert context["temporal"]["dayun_table"][0]["relations"]
-    assert all("fact_id" in item for item in context["temporal"]["dayun_table"][0]["relations"])
-    assert context["model_boundary"]["must_not_recalculate_calendar_or_pillars"] is True
-    assert context["model_boundary"]["must_use_precomputed_temporal_relations"] is True
+    assert context["context_policy"] == "deterministic_read_only"
+    assert context["natal_core"]["pillars"][2]["ganzhi"] == "壬子"
+    assert context["natal_core"]["natal_relations"][0]["fact_id"] == "RELATION-01"
+    dayun = context["temporal_hierarchy"]["dayun_sequence"][0]
+    assert dayun["ganzhi"] == "癸酉"
+    assert dayun["stem_ten_god"] == "劫财"
+    assert dayun["branch_ten_god"] == "正印"
+    assert "hidden_stems" in dayun
+    assert "natal_interactions" in dayun
+    assert context["temporal_hierarchy"]["hierarchy"] == "natal>qiyun>dayun>liunian>liuyue>liuri"
+    assert context["fact_catalog"][0]["fact_id"] == "FACT-DAY"
+    assert "model_boundary" not in context
 
 
 def test_reflection_requests_revision_when_missing_or_failed() -> None:
@@ -126,7 +139,5 @@ def test_core_prompt_requires_kinship_health_and_full_lifecycle_dayun() -> None:
         computed_relations=[],
         computed_shensha=[],
     )
-    dimensions = context["required_analysis_dimensions"]
-    assert any("父母兄弟姐妹配偶子女" in item for item in dimensions)
-    assert any("健康" in item for item in dimensions)
-    assert context["model_boundary"]["dayun_requires_birth_qiyun_and_every_period"] is True
+    assert "required_analysis_dimensions" not in context
+    assert context["temporal_hierarchy"]["dayun_sequence"]

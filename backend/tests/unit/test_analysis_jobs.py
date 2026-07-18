@@ -11,8 +11,6 @@ from app.api.dto import BirthRequest
 from app.jobs import AnalysisJobService, InMemoryAnalysisStore, JobStateError
 from app.services.agent import AnalysisPipeline
 from app.services.chart_service import ChartService
-from app.services.rag import CorpusGovernance, HybridRetriever, SourceCatalog
-from app.services.rag.seed import import_approved_seed
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -31,7 +29,6 @@ class MockProvider:
                     "content_chars": 3600,
                 }
             )
-        evidence_id = kwargs["input_payload"]["retrieval_context"]["authoritative_evidence"][0]["evidence_id"]
         payload = {
             "schema_version": "analysis-output-v1",
             "analysis_id": "analysis_job_test",
@@ -49,7 +46,7 @@ class MockProvider:
                 {"stage": "出生至起运", "conclusion": "说明起运前阶段。"},
                 *[
                     {"stage": str(item.get("ganzhi", "大运")), "conclusion": "逐柱分析该步大运。"}
-                    for item in kwargs["input_payload"]["analysis_context"]["temporal"]["dayun_table"]
+                    for item in kwargs["input_payload"]["analysis_context"]["temporal_hierarchy"]["dayun_sequence"]
                 ],
             ],
             "claims": [
@@ -58,8 +55,8 @@ class MockProvider:
                     "topic": "引用",
                     "statement": "在本规则体系下，解释倾向保持可追溯。",
                     "fact_ids": ["FACT-Y-1"],
-                    "rule_ids": [evidence_id],
-                    "evidence_ids": [evidence_id],
+                    "rule_ids": [],
+                    "evidence_ids": [],
                     "counterevidence": [],
                     "confidence": 0.7,
                     "temporal_scope": "natal",
@@ -96,13 +93,7 @@ def _chart_service() -> tuple[ChartService, str]:
 
 
 def _pipeline() -> AnalysisPipeline:
-    governance = CorpusGovernance(
-        SourceCatalog.load(ROOT / "contracts" / "rag_seed" / "source_catalog.json")
-    )
-    import_approved_seed(governance, ROOT / "contracts" / "rag_seed" / "rules_seed.jsonl")
-    return AnalysisPipeline(
-        provider=MockProvider(), retriever=HybridRetriever(governance.approved_chunks())
-    )
+    return AnalysisPipeline(provider=MockProvider())
 
 
 
@@ -113,13 +104,7 @@ class TimeoutProvider:
 
 
 def _timeout_pipeline() -> AnalysisPipeline:
-    governance = CorpusGovernance(
-        SourceCatalog.load(ROOT / "contracts" / "rag_seed" / "source_catalog.json")
-    )
-    import_approved_seed(governance, ROOT / "contracts" / "rag_seed" / "rules_seed.jsonl")
-    return AnalysisPipeline(
-        provider=TimeoutProvider(), retriever=HybridRetriever(governance.approved_chunks())
-    )
+    return AnalysisPipeline(provider=TimeoutProvider())
 
 
 def test_job_completes_and_sse_replay_is_monotonic() -> None:
@@ -140,7 +125,7 @@ def test_job_completes_and_sse_replay_is_monotonic() -> None:
     events = service.store.events_after(initial.job_id, None)
     assert [int(event.event_id) for event in events] == list(range(1, len(events) + 1))
     assert {event.stage for event in events} >= {
-        "queued", "calculating", "retrieving", "interpreting", "verifying", "report_building", "completed"
+        "queued", "calculating", "interpreting", "verifying", "report_building", "completed"
     }
     interpreting_events = [event for event in events if event.stage == "interpreting"]
     assert len(interpreting_events) >= 3

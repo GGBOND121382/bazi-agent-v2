@@ -11,7 +11,6 @@ from app.api.dto import (
     TemporalContextViewDTO,
 )
 from app.services.chat import FortuneChatService
-from app.services.rag.models import RetrievalChannel, RetrievalPlan, RetrievedEvidence
 
 
 class _ChartService:
@@ -95,27 +94,6 @@ class _ChartService:
         )
 
 
-class _Retriever:
-    def __init__(self) -> None:
-        self.plan: RetrievalPlan | None = None
-
-    def retrieve(self, plan: RetrievalPlan) -> tuple[RetrievedEvidence, ...]:
-        self.plan = plan
-        return (
-            RetrievedEvidence(
-                chunk_id="RULE-A-CHAT",
-                source_id="source-a",
-                title="流年分析规则",
-                content="结合原局、大运和流年判断阶段性倾向。",
-                citation="source-a#rule",
-                score=1.0,
-                rank_reasons=("test",),
-                channel=RetrievalChannel.AUTHORITATIVE_EVIDENCE,
-                trust_tier="A",
-            ),
-        )
-
-
 class _Provider:
     def __init__(self) -> None:
         self.input_payload: dict[str, Any] | None = None
@@ -144,11 +122,9 @@ class _Provider:
 
 
 def test_fortune_chat_builds_deterministic_temporal_context_and_filters_citations() -> None:
-    retriever = _Retriever()
     provider = _Provider()
     service = FortuneChatService(
         chart_service=_ChartService(),  # type: ignore[arg-type]
-        retriever=retriever,
         provider_factory=lambda: provider,
     )
     result = service.answer(
@@ -160,18 +136,7 @@ def test_fortune_chat_builds_deterministic_temporal_context_and_filters_citation
     )
 
     assert result["answer"]
-    assert result["citations"] == [
-        {
-            "evidence_id": "RULE-A-CHAT",
-            "title": "流年分析规则",
-            "source_id": "source-a",
-            "locator": "source-a#rule",
-        }
-    ]
-    assert retriever.plan is not None
-    assert any("官杀 印星 食伤" in query for query in retriever.plan.queries)
-    assert not any("健康五行" in query for query in retriever.plan.queries)
-    assert not any("流日" in query for query in retriever.plan.queries)
+    assert result["citations"] == []
     assert provider.input_payload is not None
     context = provider.input_payload["analysis_context"]
     assert context["context_policy"] == "deterministic_read_only"
@@ -184,6 +149,8 @@ def test_fortune_chat_builds_deterministic_temporal_context_and_filters_citation
     assert "natal_chart" not in provider.input_payload
     assert "temporal_context" not in provider.input_payload
     assert "answer_policy" not in provider.input_payload
+    assert "evidence" not in provider.input_payload
+    assert result["generation_trace"]["rag_enabled"] is False
     assert provider.input_payload["conversation_history"] == [
         {"role": "user", "content": "先看事业"}
     ]

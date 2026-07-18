@@ -29,6 +29,33 @@ RuleProfile = Literal["ziping_conservative_v1", "wenzhen_compatible_v1"]
 DEFAULT_RULE_PROFILE: RuleProfile = "wenzhen_compatible_v1"
 
 
+@dataclass(frozen=True, slots=True)
+class RelationRuleCatalog:
+    """Canonical immutable lookup tables shared by the engine and model verifier.
+
+    Keeping these sets here prevents the verifier from re-parsing the JSON schema
+    differently from the deterministic relation engine.
+    """
+
+    stem_combinations: frozenset[frozenset[str]]
+    stem_clashes: frozenset[frozenset[str]]
+    branch_six_combinations: frozenset[frozenset[str]]
+    branch_clashes: frozenset[frozenset[str]]
+    branch_harms: frozenset[frozenset[str]]
+    branch_breaks: frozenset[frozenset[str]]
+    mutual_punishments: frozenset[frozenset[str]]
+    punishment_triggers: frozenset[frozenset[str]]
+    self_punishments: frozenset[str]
+    half_combinations: frozenset[frozenset[str]]
+    arching_combinations: frozenset[frozenset[str]]
+    three_combinations: frozenset[frozenset[str]]
+    half_meetings: frozenset[frozenset[str]]
+    arching_meetings: frozenset[frozenset[str]]
+    three_meetings: frozenset[frozenset[str]]
+    hidden_combinations: frozenset[frozenset[str]]
+    three_punishments: frozenset[frozenset[str]]
+
+
 @lru_cache(maxsize=1)
 def _relations() -> dict[str, Any]:
     return cast(dict[str, Any], json.loads(REL_FILE.read_text(encoding="utf-8")))
@@ -107,6 +134,96 @@ def _combination_map(raw: object, key: str) -> dict[frozenset[str], str | None]:
             str(item.get("transformation_candidate") or item.get("element") or "") or None
         )
     return result
+
+
+@lru_cache(maxsize=1)
+def relation_rule_catalog() -> RelationRuleCatalog:
+    """Return the exact pair/group semantics used by the relation engine."""
+
+    rels = _relations()
+
+    def pair_set(raw: object) -> frozenset[frozenset[str]]:
+        return frozenset(frozenset(pair) for pair in _pair_items(raw))
+
+    def dict_pair_set(raw: object, key: str = "pair") -> frozenset[frozenset[str]]:
+        pairs: set[frozenset[str]] = set()
+        for item in _dict_items(raw):
+            values = item.get(key)
+            if isinstance(values, list) and len(values) == 2:
+                pairs.add(frozenset(str(value) for value in values))
+        return frozenset(pairs)
+
+    def ordered_group_sets(
+        raw: object,
+    ) -> tuple[
+        frozenset[frozenset[str]],
+        frozenset[frozenset[str]],
+        frozenset[frozenset[str]],
+    ]:
+        adjacent: set[frozenset[str]] = set()
+        outer: set[frozenset[str]] = set()
+        full: set[frozenset[str]] = set()
+        for item in _dict_items(raw):
+            values = item.get("branches")
+            if not isinstance(values, list) or len(values) != 3:
+                continue
+            group = tuple(str(value) for value in values)
+            adjacent.add(frozenset((group[0], group[1])))
+            adjacent.add(frozenset((group[1], group[2])))
+            outer.add(frozenset((group[0], group[2])))
+            full.add(frozenset(group))
+        return frozenset(adjacent), frozenset(outer), frozenset(full)
+
+    half_combinations, arching_combinations, three_combinations = ordered_group_sets(
+        rels.get("three_combinations")
+    )
+    half_meetings, arching_meetings, three_meetings = ordered_group_sets(
+        rels.get("three_meetings")
+    )
+
+    punishment_groups: set[frozenset[str]] = set()
+    mutual_punishments: set[frozenset[str]] = set()
+    self_punishments: set[str] = set()
+    for item in _dict_items(rels.get("punishments")):
+        values = item.get("branches")
+        if not isinstance(values, list):
+            continue
+        branches = tuple(str(value) for value in values)
+        match item.get("type"):
+            case "three_punishment" if len(branches) == 3:
+                punishment_groups.add(frozenset(branches))
+            case "mutual_punishment" if len(branches) == 2:
+                mutual_punishments.add(frozenset(branches))
+            case "self_punishment" if len(branches) == 1:
+                self_punishments.add(branches[0])
+
+    punishment_triggers = {
+        frozenset(pair)
+        for group in punishment_groups
+        for pair in combinations(tuple(group), 2)
+    }
+    raw_breaks = rels.get("branch_breaks")
+    break_pairs = raw_breaks.get("pairs", []) if isinstance(raw_breaks, dict) else []
+
+    return RelationRuleCatalog(
+        stem_combinations=dict_pair_set(rels.get("stem_five_combinations")),
+        stem_clashes=frozenset(frozenset(pair) for pair in _STEM_CLASHES),
+        branch_six_combinations=dict_pair_set(rels.get("branch_six_combinations")),
+        branch_clashes=pair_set(rels.get("branch_clashes")),
+        branch_harms=pair_set(rels.get("branch_harms")),
+        branch_breaks=pair_set(break_pairs),
+        mutual_punishments=frozenset(mutual_punishments),
+        punishment_triggers=frozenset(punishment_triggers),
+        self_punishments=frozenset(self_punishments),
+        half_combinations=half_combinations,
+        arching_combinations=arching_combinations,
+        three_combinations=three_combinations,
+        half_meetings=half_meetings,
+        arching_meetings=arching_meetings,
+        three_meetings=three_meetings,
+        hidden_combinations=dict_pair_set(rels.get("hidden_combinations")),
+        three_punishments=frozenset(punishment_groups),
+    )
 
 
 def _unordered_match(left: str, right: str, pair: tuple[str, str]) -> bool:

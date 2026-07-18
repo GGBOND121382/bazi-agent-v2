@@ -1,4 +1,5 @@
 """A2 provider boundary, deterministic verification, and report gates."""
+
 from __future__ import annotations
 
 import json
@@ -23,9 +24,6 @@ from app.api.dto import (
     StructuredAnalysisDTO,
 )
 from app.services.agent import AnalysisPipeline, ReportAssembler, verify_analysis
-from app.services.rag import CorpusGovernance, DatasetV2Retriever, HybridRetriever, SourceCatalog
-from app.services.rag.models import RetrievalChannel, RetrievedEvidence
-from app.services.rag.seed import import_approved_seed
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -65,7 +63,7 @@ def _analysis(**claim_overrides: Any) -> StructuredAnalysisDTO:
         "statement": "在本规则体系下，解释应保持可追溯。",
         "fact_ids": ["FACT-TRACE"],
         "rule_ids": ["RULE-SEED-009"],
-        "evidence_ids": ["RULE-SEED-009"],
+        "evidence_ids": [],
         "counterevidence": [],
         "confidence": 0.7,
         "temporal_scope": "natal",
@@ -84,37 +82,35 @@ def _analysis(**claim_overrides: Any) -> StructuredAnalysisDTO:
             {"dimension": name, "conclusion": "结合原局偏性和岁运变化分析。"}
             for name in ["五行偏性", "寒暖燥湿", "传统脏腑", "保护因素", "大运变化", "生活建议"]
         ],
-        dayun_assessment=[
-            {"stage": "出生至起运", "conclusion": "说明起运前阶段。"}
-        ],
+        dayun_assessment=[{"stage": "出生至起运", "conclusion": "说明起运前阶段。"}],
         claims=[claim],
         limitations=[],
     )
 
-
-def _evidence():
-    governance = CorpusGovernance(
-        SourceCatalog.load(ROOT / "contracts" / "rag_seed" / "source_catalog.json")
-    )
-    import_approved_seed(governance, ROOT / "contracts" / "rag_seed" / "rules_seed.jsonl")
-    return HybridRetriever(governance.approved_chunks())
 
 
 class _MockProvider:
     def __init__(self, payload: dict[str, Any]) -> None:
         self.payload = payload
         self.last_input: dict[str, Any] | None = None
+        self.inputs: list[dict[str, Any]] = []
 
     def complete_json(self, **kwargs: Any) -> ProviderResponse:
         self.last_input = kwargs["input_payload"]
+        self.inputs.append(kwargs["input_payload"])
         schema = kwargs["schema"]
         payload = self.payload
-        if schema.get("$id") == "analysis-repair-v1":
-            targets = kwargs["input_payload"]["repair_targets"]
+        if schema.get("$id") == "analysis-json-patch-v2":
+            operations = []
+            for path in kwargs["input_payload"]["allowed_paths"]:
+                parts = [part for part in path.split("/") if part]
+                value: Any = self.payload
+                for part in parts:
+                    value = value[int(part)] if isinstance(value, list) else value[part]
+                operations.append({"op": "replace", "path": path, "value": value})
             payload = {
-                "schema_version": "analysis-repair-v1",
-                "replacement_fields": {name: self.payload[name] for name in targets},
-                "remove_claim_ids": [],
+                "schema_version": "analysis-json-patch-v2",
+                "operations": operations,
                 "repair_summary": "mock repair",
             }
         return ProviderResponse(
@@ -124,45 +120,36 @@ class _MockProvider:
         )
 
 
-class _DatasetAwareProvider:
-    def complete_json(self, **kwargs: Any) -> ProviderResponse:
-        context = kwargs["input_payload"]["retrieval_context"]
-        authority = context["authoritative_evidence"][0]
-        payload = _analysis(
-            rule_ids=[authority["evidence_id"]],
-            evidence_ids=[authority["evidence_id"]],
-        ).model_dump(mode="json")
-        return ProviderResponse(
-            payload=payload,
-            model_id="mock-dataset-aware-v1",
-            prompt_version=kwargs["prompt_version"],
-        )
-
-
 class _LocalRepairProvider:
     def __init__(self) -> None:
         self.request_kinds: list[str] = []
+        self.inputs: list[dict[str, Any]] = []
 
     def complete_json(self, **kwargs: Any) -> ProviderResponse:
         schema = kwargs["schema"]
-        if schema.get("$id") == "analysis-repair-v1":
+        self.inputs.append(kwargs["input_payload"])
+        if schema.get("$id") == "analysis-json-patch-v2":
             self.request_kinds.append("local_repair")
+            path = kwargs["input_payload"]["allowed_paths"][0]
             payload = {
-                "schema_version": "analysis-repair-v1",
-                "replacement_fields": {
-                    "kinship_assessment": [
-                        {"relation": name, "conclusion": "局部补全并保持原全局判断。"}
-                        for name in [
-                            "父亲",
-                            "母亲",
-                            "兄弟姐妹",
-                            "配偶婚恋",
-                            "子女",
-                            "家庭互动",
-                        ]
-                    ]
-                },
-                "remove_claim_ids": [],
+                "schema_version": "analysis-json-patch-v2",
+                "operations": [
+                    {
+                        "op": "replace",
+                        "path": path,
+                        "value": [
+                            {"relation": name, "conclusion": "局部补全并保持原全局判断。"}
+                            for name in [
+                                "父亲",
+                                "母亲",
+                                "兄弟姐妹",
+                                "配偶婚恋",
+                                "子女",
+                                "家庭互动",
+                            ]
+                        ],
+                    }
+                ],
                 "repair_summary": "只补全六亲章节",
             }
         else:
@@ -171,7 +158,7 @@ class _LocalRepairProvider:
             payload["kinship_assessment"] = []
         return ProviderResponse(
             payload=payload,
-            model_id="mock-local-repair-v1",
+            model_id="mock-local-repair-v2",
             prompt_version=kwargs["prompt_version"],
         )
 
@@ -197,9 +184,7 @@ def test_deepseek_uses_streaming_thinking_defaults(monkeypatch: pytest.MonkeyPat
 
 @pytest.mark.rag
 def _sse_response(*chunks: dict[str, Any], done: bool = True) -> httpx.Response:
-    body = "".join(
-        f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n" for chunk in chunks
-    )
+    body = "".join(f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n" for chunk in chunks)
     if done:
         body += "data: [DONE]\n\n"
     return httpx.Response(200, text=body, headers={"content-type": "text/event-stream"})
@@ -265,7 +250,7 @@ def test_deepseek_rejects_truncated_stream(monkeypatch: pytest.MonkeyPatch) -> N
     def handler(_request: httpx.Request) -> httpx.Response:
         return _sse_response(
             {"choices": [{"delta": {"reasoning_content": "partial-reasoning"}}]},
-            {"choices": [{"delta": {"content": '{"status":'}, "finish_reason": "length"}]}
+            {"choices": [{"delta": {"content": '{"status":'}, "finish_reason": "length"}]},
         )
 
     provider = DeepSeekProvider(
@@ -288,95 +273,60 @@ def test_deepseek_rejects_truncated_stream(monkeypatch: pytest.MonkeyPatch) -> N
 
 @pytest.mark.rag
 def test_verifier_rejects_hallucinated_ids_and_high_risk_assertions() -> None:
-    evidence = _evidence().retrieve(
-        __import__("app.services.rag", fromlist=["RetrievalPlan"]).RetrievalPlan(
-            queries=("引用必须可追溯",), school="engineering_policy"
-        )
-    )
     analysis = _analysis(
         statement="一定患病并保证盈利。",
         fact_ids=["FACT-MISSING"],
         evidence_ids=["EVIDENCE-MISSING"],
     )
     result = verify_analysis(
-        chart=_chart(),
-        evidence=evidence,
-        analysis=analysis,
-        configured_school="engineering_policy",
+        chart=_chart(), evidence=(), analysis=analysis, configured_school="engineering_policy"
     )
     assert result.status == "failed"
     codes = {error["code"] for error in result.errors}
-    assert {"UNKNOWN_FACT", "UNKNOWN_EVIDENCE", "POLICY_HIGH_RISK_ASSERTION"} <= codes
-    assert result.approved_claim_ids == []
+    assert {"UNKNOWN_FACT", "EVIDENCE_DISABLED", "POLICY_HIGH_RISK_ASSERTION"} <= codes
 
 
 @pytest.mark.rag
-def test_verifier_rejects_c_tier_case_as_authoritative_rule() -> None:
-    case = RetrievedEvidence(
-        chunk_id="CASE-C-1",
-        source_id="case-source",
-        title="historical case",
-        content="historical example",
-        citation="case-source#CASE-C-1",
-        score=1.0,
-        rank_reasons=("test",),
-        channel=RetrievalChannel.SIMILAR_CASES,
-        collection="benchmark_case_qa",
-        trust_tier="C",
-        can_support_claim=False,
-        can_support_case_analogy=True,
-    )
-    analysis = _analysis(rule_ids=["CASE-C-1"], evidence_ids=["CASE-C-1"])
+def test_verifier_does_not_require_interpretive_rag_support() -> None:
+    analysis = _analysis(rule_ids=[], evidence_ids=[])
     result = verify_analysis(
-        chart=_chart(),
-        evidence=(case,),
-        analysis=analysis,
-        configured_school="engineering_policy",
-    )
-    codes = {error["code"] for error in result.errors}
-    assert "NON_AUTHORITATIVE_RULE" in codes
-    assert "CASE_ANALOGY_NOT_QUALIFIED" not in codes
-
-
-@pytest.mark.rag
-def test_verifier_accepts_tokens_supported_by_an_authoritative_rule() -> None:
-    authority = RetrievedEvidence(
-        chunk_id="RULE-A-1",
-        source_id="core-source",
-        title="authoritative rule",
-        content="丁火在本规则表中作为示例字符。",
-        citation="core-source#RULE-A-1",
-        score=1.0,
-        rank_reasons=("test",),
-    )
-    analysis = _analysis(
-        statement="在本规则体系下，丁火属于已引用规则内容。",
-        rule_ids=["RULE-A-1"],
-        evidence_ids=[],
-    )
-    result = verify_analysis(
-        chart=_chart(),
-        evidence=(authority,),
-        analysis=analysis,
-        configured_school="engineering_policy",
+        chart=_chart(), evidence=(), analysis=analysis, configured_school="engineering_policy"
     )
     assert result.status == "passed"
 
 
 @pytest.mark.rag
-def test_pipeline_builds_schema_valid_report_from_passed_analysis_only() -> None:
+def test_rule_validator_rejects_wrong_ten_god_hidden_stem_and_element_direction() -> None:
+    payload = _analysis().model_dump(mode="json")
+    payload["executive_summary"] = "戊日主见甲为正财；辛藏于午；土克木。"
+    analysis = StructuredAnalysisDTO.model_validate(payload)
+    result = verify_analysis(
+        chart=_chart(), evidence=(), analysis=analysis, configured_school="engineering_policy"
+    )
+    codes = {error["code"] for error in result.errors}
+    assert {"TEN_GOD_MISMATCH", "INVALID_HIDDEN_STEM", "INVALID_ELEMENT_RELATION"} <= codes
+    assert all(error.get("path") for error in result.errors if error["code"] in codes)
+
+
+@pytest.mark.rag
+def test_pipeline_builds_report_without_rag_and_keeps_prompt_and_raw_output() -> None:
     provider = _MockProvider(_analysis().model_dump(mode="json"))
-    pipeline = AnalysisPipeline(provider=provider, retriever=_evidence())
-    result = pipeline.run(chart=_chart(), user_focus=("引用必须可追溯",))
+    result = AnalysisPipeline(provider=provider).run(
+        chart=_chart(), user_focus=("引用必须可追溯",), max_revisions=0
+    )
     assert result.validation.status == "passed"
     assert result.report is not None
-    assert result.report["metadata"]["model_id"] == "mock-structured-v1"
-    assert "normalized_time" not in (provider.last_input or {})
-    assert "retrieval_context" in (provider.last_input or {})
-    assert "retrieved_evidence" not in (provider.last_input or {})
-    assert (provider.last_input or {})["retrieval_policy"][
-        "deterministic_engine_overrides_rag"
-    ] is True
+    assert result.evidence == ()
+    assert "retrieval_context" not in (provider.last_input or {})
+    assert "retrieval_policy" not in (provider.last_input or {})
+    assert result.generation_trace["rag_enabled"] is False
+    attempt = result.generation_trace["attempts"][0]
+    assert attempt["input_payload"] == provider.last_input
+    assert attempt["output_schema"]["$id"] == "analysis-output-v1"
+    assert attempt["model_output"]
+    assert "allowed_reference_ids" not in (provider.last_input or {})
+    assert result.analysis.reflection is not None
+    assert result.analysis.reflection.status == "pass"
 
     schema = json.loads(
         (ROOT / "contracts" / "schemas" / "report.schema.json").read_text(encoding="utf-8")
@@ -385,133 +335,60 @@ def test_pipeline_builds_schema_valid_report_from_passed_analysis_only() -> None
 
 
 @pytest.mark.rag
-def test_pipeline_repairs_only_the_missing_core_section() -> None:
+def test_pipeline_repairs_only_the_missing_core_section_with_minimal_context() -> None:
     provider = _LocalRepairProvider()
-    result = AnalysisPipeline(provider=provider, retriever=_evidence()).run(
-        chart=_chart(), user_focus=("引用必须可追溯",), max_revisions=1
+    result = AnalysisPipeline(provider=provider).run(
+        chart=_chart(), user_focus=("六亲",), max_revisions=1
     )
-
     assert result.validation.status == "passed"
-    assert result.report is not None
     assert provider.request_kinds == ["full_analysis", "local_repair"]
-    assert len(result.analysis.kinship_assessment) == 6
-    assert len(result.analysis.health_assessment) == 6
-    assert result.analysis.claims[0].claim_id == "CLAIM-1"
-    assert [item["request_kind"] for item in result.generation_trace["attempts"]] == [
-        "full_analysis",
-        "local_repair",
-    ]
-    repair_input = result.generation_trace["attempts"][1]["input_payload"]
-    assert repair_input["repair_targets"] == ["kinship_assessment"]
-    assert "retrieved_evidence" not in repair_input
+    repair_input = provider.inputs[1]
+    assert repair_input["allowed_paths"] == ["/kinship_assessment"]
+    assert set(repair_input) == {
+        "chart_id",
+        "analysis_profile",
+        "user_focus",
+        "repair_mode",
+        "allowed_paths",
+        "current_blocks",
+        "global_analysis_state",
+        "consistency_neighbors",
+        "relevant_context",
+        "validation_errors",
+        "revision_guidance",
+    }
+    assert "dayun_sequence" not in repair_input["relevant_context"].get("temporal_hierarchy", {})
+    full_size = len(json.dumps(provider.inputs[0], ensure_ascii=False))
+    repair_size = len(json.dumps(repair_input, ensure_ascii=False))
+    assert repair_size < 5000
+    assert repair_size < full_size * 1.1
 
 
 @pytest.mark.rag
-def test_pipeline_discards_one_malformed_claim_instead_of_failing_the_job() -> None:
+def test_pipeline_discards_one_malformed_claim_and_normalizes_evidence_ids() -> None:
     payload = _analysis().model_dump(mode="json")
+    payload["claims"][0]["rule_ids"] = ["legacy-rule-id"]
+    payload["claims"][0]["evidence_ids"] = ["legacy-rag-id"]
     payload["claims"].append(
-        {
-            **payload["claims"][0],
-            "claim_id": "CLAIM-UNTRACEABLE",
-            "fact_ids": [],
-        }
+        {**payload["claims"][0], "claim_id": "CLAIM-UNTRACEABLE", "fact_ids": []}
     )
-
-    result = AnalysisPipeline(
-        provider=_MockProvider(payload), retriever=_evidence()
-    ).run(chart=_chart(), user_focus=("引用必须可追溯",), max_revisions=0)
-
+    result = AnalysisPipeline(provider=_MockProvider(payload)).run(
+        chart=_chart(), user_focus=("综合",), max_revisions=0
+    )
     assert result.validation.status == "passed"
-    assert result.report is not None
     assert [claim.claim_id for claim in result.analysis.claims] == ["CLAIM-1"]
-    assert result.generation_trace["attempts"][0]["schema_repairs"][0]["code"] == (
-        "INVALID_CLAIM_SCHEMA"
-    )
-
-
-@pytest.mark.rag
-def test_pipeline_defaults_omitted_empty_evidence_ids_without_inventing_citations() -> None:
-    payload = _analysis().model_dump(mode="json")
-    payload["claims"][0].pop("evidence_ids")
-
-    result = AnalysisPipeline(
-        provider=_MockProvider(payload), retriever=_evidence()
-    ).run(chart=_chart(), user_focus=("引用必须可追溯",), max_revisions=0)
-
-    assert result.validation.status == "passed"
+    assert result.analysis.claims[0].rule_ids == []
     assert result.analysis.claims[0].evidence_ids == []
-    repair = result.generation_trace["attempts"][0]["schema_repairs"][0]
-    assert repair["code"] == "DEFAULTED_EMPTY_CLAIM_REFERENCES"
-    assert repair["fields"] == ["evidence_ids"]
-
-
-@pytest.mark.rag
-def test_pipeline_runs_end_to_end_with_production_dataset_channels() -> None:
-    pipeline = AnalysisPipeline(
-        provider=_DatasetAwareProvider(),
-        retriever=DatasetV2Retriever(ROOT / "data" / "bazi_rag_dataset_v2_1"),
-    )
-    result = pipeline.run(chart=_chart(), user_focus=("财运",))
-    assert result.validation.status == "passed"
-    assert result.report is not None
-    assert any(item.can_support_claim for item in result.evidence)
-    assert any(item.can_supply_explanation for item in result.evidence)
-
-
-@pytest.mark.rag
-def test_failed_validation_never_produces_formal_report() -> None:
-    provider = _MockProvider(_analysis(evidence_ids=["invented-evidence"]).model_dump(mode="json"))
-    result = AnalysisPipeline(provider=provider, retriever=_evidence()).run(
-        chart=_chart(), user_focus=("引用必须可追溯",)
-    )
-    assert result.validation.status == "failed"
-    assert result.report is None
-    assert "validation_errors" in (provider.last_input or {})
-
-
-@pytest.mark.rag
-def test_pipeline_salvages_only_claims_that_pass_the_deterministic_gate() -> None:
-    valid = _analysis().model_dump(mode="json")
-    invalid = {
-        **valid["claims"][0],
-        "claim_id": "CLAIM-INVALID",
-        "evidence_ids": ["invented-evidence"],
+    repairs = result.generation_trace["attempts"][0]["schema_repairs"]
+    assert {item["code"] for item in repairs} == {
+        "DEFAULTED_EMPTY_CLAIM_REFERENCES",
+        "INVALID_CLAIM_SCHEMA",
     }
-    valid["claims"] = [*valid["claims"], invalid]
-    result = AnalysisPipeline(
-        provider=_MockProvider(valid), retriever=_evidence()
-    ).run(
-        chart=_chart(),
-        user_focus=("引用必须可追溯",),
-        max_revisions=0,
-    )
-
-    assert result.validation.status == "passed"
-    assert result.report is not None
-    assert [claim.claim_id for claim in result.analysis.claims] == ["CLAIM-1"]
-    assert not any("已排除" in item for item in result.analysis.limitations)
-    report_claim_ids = {
-        block["claim_id"]
-        for section in result.report["sections"]
-        for block in section["content_blocks"]
-        if str(block["claim_id"]).startswith("CLAIM-")
-    }
-    assert report_claim_ids == {"CLAIM-1"}
 
 
 @pytest.mark.rag
-def test_pipeline_salvages_bad_claim_and_lists_missing_deterministic_dayun() -> None:
+def test_pipeline_supplements_missing_deterministic_dayun_with_fallback_marker() -> None:
     payload = _analysis().model_dump(mode="json")
-    payload["dayun_assessment"][0]["conclusion"] += " 2000 年后仍须逐步核对。"
-    payload["claims"].append(
-        {
-            **payload["claims"][0],
-            "claim_id": "CLAIM-INVALID-DAYUN",
-            "fact_ids": ["FACT-NOT-REAL"],
-            "rule_ids": [],
-            "evidence_ids": [],
-        }
-    )
     chart = _chart().model_copy(
         update={
             "dayun": [
@@ -526,16 +403,41 @@ def test_pipeline_salvages_bad_claim_and_lists_missing_deterministic_dayun() -> 
             ]
         }
     )
-
-    result = AnalysisPipeline(
-        provider=_MockProvider(payload), retriever=_evidence()
-    ).run(chart=chart, user_focus=("引用必须可追溯",), max_revisions=0)
-
+    result = AnalysisPipeline(provider=_MockProvider(payload)).run(
+        chart=chart, user_focus=("大运",), max_revisions=0
+    )
     assert result.validation.status == "passed"
-    assert result.report is not None
-    assert [claim.claim_id for claim in result.analysis.claims] == ["CLAIM-1"]
-    assert any("丁亥" in str(item.get("stage")) for item in result.analysis.dayun_assessment)
-    assert any("确定性排盘信息" in item for item in result.analysis.limitations)
+    fallback = next(item for item in result.analysis.dayun_assessment if "丁亥" in item["stage"])
+    assert fallback["coverage_status"] == "deterministic_fallback"
+    assert fallback["interpretation_status"] == "missing"
+
+
+@pytest.mark.rag
+def test_programmatic_reflection_diagnostics_are_not_revalidated_as_report_text() -> None:
+    payload = _analysis().model_dump(mode="json")
+    payload["reflection"] = {
+        "status": "revise",
+        "contradictions": ["土克木的五行方向不成立"],
+        "revision_instructions": ["修复原错误：土克木"],
+    }
+    analysis = StructuredAnalysisDTO.model_validate(payload)
+    result = verify_analysis(
+        chart=_chart(), evidence=(), analysis=analysis, configured_school="engineering_policy"
+    )
+    assert result.status == "passed"
+
+
+@pytest.mark.rag
+def test_failed_semantic_validation_never_produces_formal_report() -> None:
+    payload = _analysis().model_dump(mode="json")
+    payload["kinship_assessment"][0]["conclusion"] = "父星辛金藏于午。"
+    result = AnalysisPipeline(provider=_MockProvider(payload)).run(
+        chart=_chart(), user_focus=("六亲",), max_revisions=0
+    )
+    assert result.validation.status == "failed"
+    assert result.report is None
+    assert result.analysis.reflection is not None
+    assert result.analysis.reflection.status == "revise"
 
 
 @pytest.mark.rag
@@ -565,40 +467,27 @@ def test_report_contains_dedicated_kinship_health_and_lifecycle_dayun_sections()
     payload.update(
         {
             "kinship_assessment": [
-                {
-                    "relation": name,
-                    "conclusion": "结合六亲星、宫位与岁运分析。",
-                    "fact_ids": ["FACT-TRACE"],
-                    "rule_ids": ["RULE-SEED-009"],
-                    "evidence_ids": ["RULE-SEED-009"],
-                }
+                {"relation": name, "conclusion": "结合六亲星、宫位与岁运分析。"}
                 for name in ["父亲", "母亲", "兄弟姐妹", "配偶婚恋", "子女", "家庭互动"]
             ],
             "health_assessment": [
-                {
-                    "dimension": name,
-                    "conclusion": "区分长期偏性、保护因素与大运触发。",
-                    "fact_ids": ["FACT-TRACE"],
-                    "rule_ids": ["RULE-SEED-009"],
-                    "evidence_ids": ["RULE-SEED-009"],
-                }
+                {"dimension": name, "conclusion": "结合五行偏性、调候与岁运变化分析。"}
                 for name in ["五行偏性", "寒暖燥湿", "传统脏腑", "保护因素", "大运变化", "生活建议"]
             ],
             "dayun_assessment": [
                 {
-                    "title": "出生至起运",
+                    "stage": "出生至起运",
                     "conclusion": "说明起运前阶段与后续大运承接。",
                     "fact_ids": ["FACT-TRACE"],
                     "rule_ids": ["RULE-SEED-009"],
-                    "evidence_ids": ["RULE-SEED-009"],
+                    "evidence_ids": [],
                 }
             ],
         }
     )
-    result = AnalysisPipeline(provider=_MockProvider(payload), retriever=_evidence()).run(
-        chart=_chart(), user_focus=("引用必须可追溯",)
+    result = AnalysisPipeline(provider=_MockProvider(payload)).run(
+        chart=_chart(), user_focus=("综合",), max_revisions=0
     )
     assert result.report is not None
     section_ids = {section["section_id"] for section in result.report["sections"]}
     assert {"kinship", "health", "dayun-lifecycle"} <= section_ids
-    assert result.generation_trace["attempts"]

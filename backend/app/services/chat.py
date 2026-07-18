@@ -13,14 +13,7 @@ from ..logging_setup import append_llm_trace
 from ..persistence import connect
 from .agent.prompts import FORTUNE_CHAT_PROMPT_VERSION, build_fortune_chat_system_prompt
 from .chart_service import ChartService, get_default_service
-from .chat_context import (
-    build_model_context,
-    build_retrieval_queries,
-    compact_history,
-    detect_chat_topics,
-    is_redundant_deterministic_evidence,
-)
-from .rag import DatasetV2Retriever, EvidenceRetriever, RetrievalPlan, RetrievedEvidence
+from .chat_context import build_model_context, compact_history, detect_chat_topics
 
 ChatScope = Literal["general", "dayun", "lifecycle", "year", "month", "day"]
 
@@ -65,27 +58,15 @@ _CHAT_SCHEMA: dict[str, Any] = {
 }
 
 
-def _serialize_evidence(item: RetrievedEvidence) -> dict[str, object]:
-    return {
-        "evidence_id": item.chunk_id,
-        "title": item.title,
-        "content": item.content,
-        "citation": item.citation,
-        "channel": item.channel.value,
-        "trust_tier": item.trust_tier,
-    }
-
 
 class FortuneChatService:
     def __init__(
         self,
         *,
         chart_service: ChartService,
-        retriever: EvidenceRetriever,
         provider_factory: Callable[[], StructuredOutputProvider] = DeepSeekProvider,
     ) -> None:
         self.chart_service = chart_service
-        self.retriever = retriever
         self.provider_factory = provider_factory
 
     def answer(
@@ -120,42 +101,6 @@ class FortuneChatService:
                 active_dayun,
             )
         topics = detect_chat_topics(question)
-        basic = (
-            deterministic_details.get("basic", {})
-            if isinstance(deterministic_details, dict)
-            else {}
-        )
-        gender = str(basic.get("gender", "unspecified")) if isinstance(basic, dict) else "unspecified"
-        queries = build_retrieval_queries(
-            question=question,
-            day_master=chart.day_master,
-            gender=gender,
-            scope=scope,
-            topics=topics,
-            active_dayun_ganzhi=str(selected_dayun.get("ganzhi", "")),
-            year_ganzhi=target_pillars["year"],
-            month_ganzhi=target_pillars["month"],
-            day_ganzhi=target_pillars["day"],
-        )
-        evidence = self.retriever.retrieve(
-            RetrievalPlan(
-                queries=queries,
-                school=school,
-                task_type="interpretation",
-                top_k=8,
-                case_top_k=1,
-                explanation_top_k=2,
-            )
-        )
-        prompt_evidence = tuple(
-            item
-            for item in evidence
-            if not is_redundant_deterministic_evidence(
-                source_id=item.source_id,
-                title=item.title,
-            )
-        )
-        evidence_payload = [_serialize_evidence(item) for item in prompt_evidence]
         natal_payload = {
             "day_master": chart.day_master,
             "pillars": [item.model_dump(mode="json") for item in chart.pillars],
@@ -197,8 +142,6 @@ class FortuneChatService:
             "analysis_context": analysis_context,
             "output_profile": "fortune-chat-json-v2",
         }
-        if evidence_payload:
-            payload["evidence"] = evidence_payload
         compacted_history = compact_history(history)
         if compacted_history:
             payload["conversation_history"] = compacted_history
@@ -229,30 +172,14 @@ class FortuneChatService:
             if isinstance(raw_sections, list)
             else []
         )
-        known_evidence = {item.chunk_id: item for item in prompt_evidence}
-        raw_citations = response.payload.get("citations", [])
-        citation_ids = [
-            str(item)
-            for item in raw_citations
-            if isinstance(raw_citations, list) and str(item) in known_evidence
-        ]
-        citations = [
-            {
-                "evidence_id": evidence_id,
-                "title": known_evidence[evidence_id].title,
-                "source_id": known_evidence[evidence_id].source_id,
-                "locator": known_evidence[evidence_id].citation,
-            }
-            for evidence_id in dict.fromkeys(citation_ids)
-        ]
+        citations: list[dict[str, object]] = []
         trace: dict[str, Any] = {
             "trace_type": "fortune_chat",
             "system_prompt": system_prompt,
             "prompt_version": response.prompt_version,
             "model_id": response.model_id,
             "input_payload": payload,
-            "retrieval_queries": list(queries),
-            "retrieved_evidence": [_serialize_evidence(item) for item in evidence],
+            "rag_enabled": False,
             "deterministic_snapshot": {
                 "natal": natal_payload,
                 "temporal": temporal_payload,
@@ -376,6 +303,5 @@ def get_default_chat_service() -> FortuneChatService:
     if _DEFAULT_CHAT_SERVICE is None:
         _DEFAULT_CHAT_SERVICE = FortuneChatService(
             chart_service=get_default_service(),
-            retriever=DatasetV2Retriever(),
         )
     return _DEFAULT_CHAT_SERVICE

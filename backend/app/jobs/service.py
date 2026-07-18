@@ -9,7 +9,6 @@ from collections.abc import Callable
 from ..adapters.llm import DeepSeekProvider, ModelProviderError
 from ..services.agent import AnalysisPipeline, AnalysisPipelineError
 from ..services.chart_service import ChartService, get_default_service
-from ..services.rag import DatasetV2Retriever
 from .sqlite_store import SQLiteAnalysisStore
 from .state import TERMINAL_STAGES, AnalysisJob, InMemoryAnalysisStore, JobStateError
 
@@ -263,7 +262,7 @@ def _to_report_view(report: dict[str, object]) -> dict[str, object]:
 
 
 def default_pipeline() -> AnalysisPipeline:
-    return AnalysisPipeline(provider=DeepSeekProvider(), retriever=DatasetV2Retriever())
+    return AnalysisPipeline(provider=DeepSeekProvider())
 
 
 _DEFAULT = AnalysisJobService(

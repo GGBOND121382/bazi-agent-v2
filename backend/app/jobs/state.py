@@ -14,7 +14,7 @@ from ..api.dto import JobEventDTO, StructuredAnalysisDTO
 TERMINAL_STAGES = frozenset({"completed", "failed", "cancelled"})
 TRANSITIONS: dict[str, frozenset[str]] = {
     "queued": frozenset({"calculating", "cancelled"}),
-    "calculating": frozenset({"retrieving", "failed", "cancelled"}),
+    "calculating": frozenset({"retrieving", "interpreting", "failed", "cancelled"}),
     "retrieving": frozenset({"interpreting", "failed", "cancelled"}),
     "interpreting": frozenset({"verifying", "failed", "cancelled"}),
     "verifying": frozenset({"revision_pending", "report_building", "failed", "cancelled"}),

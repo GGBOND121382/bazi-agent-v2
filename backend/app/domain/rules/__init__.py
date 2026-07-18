@@ -15,8 +15,10 @@ from .relations import (
     BranchRelation,
     PositionedPillar,
     PositionedRelation,
+    RelationRuleCatalog,
     evaluate_positioned_relations,
     evaluate_relations,
+    relation_rule_catalog,
 )
 from .shensha import (
     ShenShaHit,
@@ -32,6 +34,7 @@ __all__ = [
     "PositionedPillar",
     "PositionedRelation",
     "QiyunResult",
+    "RelationRuleCatalog",
     "ShenShaHit",
     "build_temporal_context",
     "compute_exact_yun",
@@ -40,6 +43,7 @@ __all__ = [
     "describe_temporal_pillar",
     "evaluate_positioned_relations",
     "evaluate_relations",
+    "relation_rule_catalog",
     "evaluate_shensha",
     "evaluate_shensha_for_target",
 ]
