@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable
 
-from ..adapters.llm import DeepSeekProvider
+from ..adapters.llm import DeepSeekProvider, ModelProviderError
 from ..services.agent import AnalysisPipeline, AnalysisPipelineError
 from ..services.chart_service import ChartService, get_default_service
 from ..services.rag import DatasetV2Retriever
@@ -66,7 +67,7 @@ class AnalysisJobService:
                 self.process(job.job_id)
         return job
 
-    def process(self, job_id: str) -> None:
+    def process(self, job_id: str) -> None:  # noqa: PLR0915
         job = self.require(job_id)
         try:
             self.store.transition(job_id, stage="calculating", progress=_PROGRESS["calculating"])
@@ -76,13 +77,65 @@ class AnalysisJobService:
                 current = self.require(job_id)
                 if current.cancel_requested:
                     raise JobCancelled
-                self.store.transition(job_id, stage=stage, progress=_PROGRESS[stage])
+                self.store.transition(
+                    job_id, stage=stage, progress=max(current.progress, _PROGRESS[stage])
+                )
+
+            last_model_event_at = 0.0
+            last_model_progress = _PROGRESS["interpreting"]
+            last_model_phase = ""
+
+            def on_model_progress(event: dict[str, object]) -> None:
+                nonlocal last_model_event_at, last_model_progress, last_model_phase
+                current = self.require(job_id)
+                if current.cancel_requested:
+                    raise JobCancelled
+                phase = str(event.get("phase", "reasoning"))
+                reasoning_value = event.get("reasoning_chars", 0)
+                content_value = event.get("content_chars", 0)
+                reasoning_chars = reasoning_value if isinstance(reasoning_value, int) else 0
+                content_chars = content_value if isinstance(content_value, int) else 0
+                revision_call = current.progress >= _PROGRESS["revision_pending"]
+                if revision_call:
+                    if phase == "answering" or content_chars:
+                        target = min(88, 84 + content_chars // 1200)
+                    elif phase == "reasoning":
+                        target = min(84, 79 + reasoning_chars // 900)
+                    else:
+                        target = max(last_model_progress, 78)
+                elif phase == "answering" or content_chars:
+                    target = min(73, 65 + content_chars // 1800)
+                elif phase == "reasoning":
+                    target = min(65, 56 + reasoning_chars // 1200)
+                else:
+                    target = max(last_model_progress, 55)
+                target = max(current.progress, last_model_progress, target)
+                now = time.monotonic()
+                important = phase != last_model_phase or phase in {"retrying", "completed"}
+                if not important and target == last_model_progress and now - last_model_event_at < 2.0:
+                    return
+                if current.stage != "interpreting":
+                    return
+                self.store.heartbeat(
+                    job_id,
+                    progress=target,
+                    safe_details={
+                        "provider_phase": phase,
+                        "attempt": event.get("attempt"),
+                        "reasoning_chars": reasoning_chars,
+                        "content_chars": content_chars,
+                    },
+                )
+                last_model_event_at = now
+                last_model_progress = target
+                last_model_phase = phase
 
             result = self.pipeline_factory().run(
                 chart=chart,
                 user_focus=job.user_focus,
                 school=job.school,
                 on_stage=on_stage,
+                on_model_progress=on_model_progress,
                 max_revisions=2,
             )
             if result.validation.status != "passed" or result.report is None:
@@ -112,6 +165,18 @@ class AnalysisJobService:
             if current.stage not in TERMINAL_STAGES:
                 self.store.transition(
                     job_id, stage="cancelled", progress=current.progress, retryable=False
+                )
+        except ModelProviderError as exc:
+            logger.warning("analysis_model_failed job_id=%s code=%s", job_id, exc.error_code, exc_info=True)
+            current = self.require(job_id)
+            if current.stage not in TERMINAL_STAGES:
+                self.store.transition(
+                    job_id,
+                    stage="failed",
+                    progress=current.progress,
+                    retryable=exc.retryable,
+                    error_code=exc.error_code,
+                    safe_details={"provider_error": exc.error_code},
                 )
         except AnalysisPipelineError as exc:
             logger.warning("analysis_pipeline_failed job_id=%s", job_id, exc_info=True)

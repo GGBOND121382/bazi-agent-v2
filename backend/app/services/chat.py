@@ -252,6 +252,12 @@ class FortuneChatService:
             "retrieval_queries": list(queries),
             "retrieved_evidence": evidence_payload,
             "model_output": response.payload,
+            "provider_reasoning_content": response.reasoning_content,
+            "provider_usage": response.usage,
+            "provider_finish_reason": response.finish_reason,
+            "provider_streamed": response.streamed,
+            "provider_transport_attempts": response.transport_attempts,
+            "provider_timings": response.timings,
         }
         resolved_thread_id = self._save_conversation(
             owner_id=owner_id,

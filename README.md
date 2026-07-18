@@ -70,6 +70,15 @@ INITIAL_ADMIN_PASSWORD=123456
 DEFAULT_USER_PASSWORD=123456
 BAZI_RUNTIME_DIR=runtime
 ENABLE_REPORT_SHARING=false
+
+# DeepSeek 完整报告：单次整体思考 + SSE 流式接收
+DEEPSEEK_MODEL=deepseek-v4-pro
+DEEPSEEK_THINKING=enabled
+DEEPSEEK_REASONING_EFFORT=high
+DEEPSEEK_STREAM_IDLE_TIMEOUT=90
+DEEPSEEK_TOTAL_TIMEOUT=600
+DEEPSEEK_MAX_TOKENS=65536
+DEEPSEEK_MAX_TRANSPORT_ATTEMPTS=2
 ```
 
 管理员可进入 `/admin` 创建普通用户、重置密码，并查看用户的排盘和对话记录。新用户默认密码取 `DEFAULT_USER_PASSWORD`。密码在 SQLite 中以 PBKDF2 哈希保存。
@@ -92,6 +101,15 @@ runtime/
 系统重启后，用户、命盘、报告、对话历史、实际 Prompt、RAG 命中、模型原始输出、验证结果和修复轮次均会保留。可在 `config.local.env` 中修改 `BAZI_RUNTIME_DIR`。
 
 `llm_calls.jsonl` 和数据库中的调用轨迹不会记录 DeepSeek API Key、Cookie 或密码，但会包含出生信息、命盘上下文和用户问题，请按个人数据文件妥善保管。
+
+### DeepSeek 流式报告策略
+
+- 主报告只调用一次完整上下文：原局、六亲、健康、全部大运和总体结论在同一轮思考中完成，不按章节独立拼接。
+- 后端分别累计 DeepSeek 返回的 `reasoning_content` 与最终 `content`；只有完整 JSON 收到 `[DONE]` 且通过校验后才生成报告。
+- 流中断、读取超时会按 `DEEPSEEK_MAX_TRANSPORT_ATTEMPTS` 有限重试；页面通过流式心跳显示“连接模型 / 整体推理 / 生成结构化报告 / 自动重试”。
+- 校验发现局部缺项时，只请求替换六亲、健康、大运或 claims 等目标字段；未列入修复目标的全局判断保持冻结。无法安全定位的跨章节矛盾才回退为完整修订。
+- `DEEPSEEK_STREAM_IDLE_TIMEOUT` 是连续无数据的空闲超时；`DEEPSEEK_TOTAL_TIMEOUT` 是一次模型调用的总期限。
+- `generation_trace` 与 `llm_calls.jsonl` 会保存模型、token 用量、首块耗时、总耗时、传输重试次数、最终输出以及 provider 返回的 reasoning 内容。
 
 ## 本轮核心分析能力
 

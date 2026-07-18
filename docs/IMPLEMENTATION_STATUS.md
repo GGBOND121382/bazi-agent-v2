@@ -38,3 +38,12 @@ DeepSeek 完整在线 E2E：此前已 passed（正式 RAG、validation、报告�
 - 当前玩具版使用 SQLite；若未来需要多实例部署，再替换为 PostgreSQL、独立任务队列和对象存储。
 - 多用户上线前接入身份认证、owner 隔离、CSRF 策略与速率限制；当前工作区为 anonymous 单用户模式。
 - 部署环境继续通过 Secret 注入 `DEEPSEEK_API_KEY`，并配置 Provider 超时率、验证失败率和费用监控。
+## DeepSeek 整体流式分析
+
+- 完整报告使用 `deepseek-v4-pro` thinking 模式单次流式调用，保持原局、六亲、健康和全部大运在同一上下文中。
+- SSE 分别累计 provider `reasoning_content` 与最终 JSON `content`；收到 `[DONE]` 后才进入结构化校验。
+- 支持空闲超时、总期限、一次自动重试、明确模型错误码和前端流式进度心跳。
+- 首轮校验失败优先进行字段级局部修复，只有无法定位的跨章节矛盾才完整修订。
+- 报告主输入不再重复传送 `retrieved_evidence` 与 `retrieval_context` 两份相同 RAG 正文。
+
+详见 `docs/STREAMING_LLM_DESIGN.md`。

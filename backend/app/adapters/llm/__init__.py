@@ -1,5 +1,23 @@
 """LLM provider adapters. Providers may interpret facts but never calculate them."""
 
-from .deepseek import DeepSeekProvider, ProviderConfigurationError, ProviderResponse
+from .deepseek import (
+    DeepSeekProvider,
+    ModelInvalidOutputError,
+    ModelOutputTruncatedError,
+    ModelProviderError,
+    ModelStreamInterruptedError,
+    ModelTimeoutError,
+    ProviderConfigurationError,
+    ProviderResponse,
+)
 
-__all__ = ["DeepSeekProvider", "ProviderConfigurationError", "ProviderResponse"]
+__all__ = [
+    "DeepSeekProvider",
+    "ModelInvalidOutputError",
+    "ModelOutputTruncatedError",
+    "ModelProviderError",
+    "ModelStreamInterruptedError",
+    "ModelTimeoutError",
+    "ProviderConfigurationError",
+    "ProviderResponse",
+]

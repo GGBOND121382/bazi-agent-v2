@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from app.adapters.llm import ProviderResponse
+from app.adapters.llm import ModelTimeoutError, ProviderResponse
 from app.api.dto import BirthRequest
 from app.jobs import AnalysisJobService, InMemoryAnalysisStore, JobStateError
 from app.services.agent import AnalysisPipeline
@@ -19,7 +19,19 @@ ROOT = Path(__file__).resolve().parents[3]
 
 class MockProvider:
     def complete_json(self, **kwargs: Any) -> ProviderResponse:
-        evidence_id = kwargs["input_payload"]["retrieved_evidence"][0]["evidence_id"]
+        callback = kwargs.get("on_stream_event")
+        if callback:
+            callback({"phase": "request_started", "attempt": 1})
+            callback({"phase": "reasoning", "attempt": 1, "reasoning_chars": 2400})
+            callback(
+                {
+                    "phase": "answering",
+                    "attempt": 1,
+                    "reasoning_chars": 2400,
+                    "content_chars": 3600,
+                }
+            )
+        evidence_id = kwargs["input_payload"]["retrieval_context"]["authoritative_evidence"][0]["evidence_id"]
         payload = {
             "schema_version": "analysis-output-v1",
             "analysis_id": "analysis_job_test",
@@ -56,6 +68,15 @@ class MockProvider:
             ],
             "limitations": ["传统文化解释存在不确定性。"],
         }
+        if callback:
+            callback(
+                {
+                    "phase": "completed",
+                    "attempt": 1,
+                    "reasoning_chars": 2400,
+                    "content_chars": 3600,
+                }
+            )
         return ProviderResponse(payload=payload, model_id="mock", prompt_version="test-v1")
 
 
@@ -84,6 +105,23 @@ def _pipeline() -> AnalysisPipeline:
     )
 
 
+
+
+class TimeoutProvider:
+    def complete_json(self, **_kwargs: Any) -> ProviderResponse:
+        raise ModelTimeoutError("test timeout")
+
+
+def _timeout_pipeline() -> AnalysisPipeline:
+    governance = CorpusGovernance(
+        SourceCatalog.load(ROOT / "contracts" / "rag_seed" / "source_catalog.json")
+    )
+    import_approved_seed(governance, ROOT / "contracts" / "rag_seed" / "rules_seed.jsonl")
+    return AnalysisPipeline(
+        provider=TimeoutProvider(), retriever=HybridRetriever(governance.approved_chunks())
+    )
+
+
 def test_job_completes_and_sse_replay_is_monotonic() -> None:
     charts, chart_id = _chart_service()
     service = AnalysisJobService(
@@ -104,6 +142,13 @@ def test_job_completes_and_sse_replay_is_monotonic() -> None:
     assert {event.stage for event in events} >= {
         "queued", "calculating", "retrieving", "interpreting", "verifying", "report_building", "completed"
     }
+    interpreting_events = [event for event in events if event.stage == "interpreting"]
+    assert len(interpreting_events) >= 3
+    assert any(
+        event.safe_details and event.safe_details.get("provider_phase") == "reasoning"
+        for event in interpreting_events
+    )
+    assert [event.progress for event in events] == sorted(event.progress for event in events)
     assert service.store.events_after(initial.job_id, "3")[0].event_id == "4"
     report = service.store.get_report(completed.result_ref)
     assert report and report["schema_version"] == "report-view-v1"
@@ -116,6 +161,26 @@ def test_job_completes_and_sse_replay_is_monotonic() -> None:
         run_async=False,
     )
     assert same.job_id == initial.job_id
+
+
+def test_model_timeout_is_not_reported_as_internal_error() -> None:
+    charts, chart_id = _chart_service()
+    service = AnalysisJobService(
+        chart_service=charts,
+        pipeline_factory=_timeout_pipeline,
+        store=InMemoryAnalysisStore(),
+    )
+    initial = service.start(
+        chart_id=chart_id,
+        user_focus=("引用必须可追溯",),
+        school="engineering_policy",
+        idempotency_key="job-timeout",
+        run_async=False,
+    )
+    failed = service.require(initial.job_id)
+    assert failed.stage == "failed"
+    assert failed.error_code == "MODEL_TIMEOUT"
+    assert service.store.events_after(initial.job_id, None)[-1].retryable is True
 
 
 def test_invalid_transition_and_terminal_cancel_are_rejected() -> None:

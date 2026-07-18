@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[3]
 
 class ContractProvider:
     def complete_json(self, **kwargs: Any) -> ProviderResponse:
-        item = kwargs["input_payload"]["retrieved_evidence"][0]
+        item = kwargs["input_payload"]["retrieval_context"]["authoritative_evidence"][0]
         return ProviderResponse(
             model_id="contract-mock",
             prompt_version=kwargs["prompt_version"],

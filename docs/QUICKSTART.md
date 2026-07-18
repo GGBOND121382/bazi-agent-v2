@@ -244,3 +244,19 @@ $env:BAZI_RAG_DATASET_DIR = 'D:\your-path\bazi_rag_dataset_v2_1'
 - 传统命理解释仅作文化研究与辅助阅读，不构成医疗、投资或法律建议。
 - C 级解释和历史案例不能作为通用规则或必然预测。
 - 后端不会输出模型内部思维链；只有通过确定性验证的 claim 才能进入报告。
+
+## DeepSeek 流式与超时配置
+
+可在仓库根目录 `config.local.env` 中设置：
+
+```env
+DEEPSEEK_MODEL=deepseek-v4-pro
+DEEPSEEK_THINKING=enabled
+DEEPSEEK_REASONING_EFFORT=high
+DEEPSEEK_STREAM_IDLE_TIMEOUT=90
+DEEPSEEK_TOTAL_TIMEOUT=600
+DEEPSEEK_MAX_TOKENS=65536
+DEEPSEEK_MAX_TRANSPORT_ATTEMPTS=2
+```
+
+完整报告采用单次整体流式调用。页面在 55% 之后会依据模型流式 chunk 更新子阶段；若传输中断会自动重试一次。局部校验失败时只修复目标字段，不会默认重新生成整份报告。

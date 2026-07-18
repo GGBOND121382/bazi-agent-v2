@@ -129,6 +129,25 @@ class InMemoryAnalysisStore:
             self._append_event(updated, retryable=retryable, safe_details=safe_details)
             return updated
 
+    def heartbeat(
+        self,
+        job_id: str,
+        *,
+        progress: int,
+        safe_details: dict[str, Any] | None = None,
+    ) -> AnalysisJob:
+        """Persist a same-stage progress event without weakening transition rules."""
+        with self._lock:
+            current = self._jobs.get(job_id)
+            if current is None:
+                raise JobStateError("job not found")
+            if current.stage in TERMINAL_STAGES:
+                return current
+            updated = replace(current, progress=max(current.progress, progress))
+            self._jobs[job_id] = updated
+            self._append_event(updated, retryable=True, safe_details=safe_details)
+            return updated
+
     def request_cancel(self, job_id: str) -> AnalysisJob:
         with self._lock:
             job = self._jobs.get(job_id)

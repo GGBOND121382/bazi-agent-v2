@@ -111,6 +111,29 @@ class SQLiteAnalysisStore:
             self._append_event(conn, updated, retryable=retryable, safe_details=safe_details)
             return updated
 
+    def heartbeat(
+        self,
+        job_id: str,
+        *,
+        progress: int,
+        safe_details: dict[str, Any] | None = None,
+    ) -> AnalysisJob:
+        """Persist a same-stage progress event for long streaming model calls."""
+        with self._lock, connect() as conn:
+            row = conn.execute("SELECT * FROM analysis_jobs WHERE job_id=?", (job_id,)).fetchone()
+            if row is None:
+                raise JobStateError("job not found")
+            current = self._job(row)
+            if current.stage in {"completed", "failed", "cancelled"}:
+                return current
+            updated = replace(current, progress=max(current.progress, progress))
+            conn.execute(
+                "UPDATE analysis_jobs SET progress=? WHERE job_id=?",
+                (updated.progress, job_id),
+            )
+            self._append_event(conn, updated, retryable=True, safe_details=safe_details)
+            return updated
+
     def request_cancel(self, job_id: str) -> AnalysisJob:
         with self._lock, connect() as conn:
             row = conn.execute("SELECT * FROM analysis_jobs WHERE job_id=?", (job_id,)).fetchone()

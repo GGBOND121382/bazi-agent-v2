@@ -9,7 +9,11 @@ import httpx
 import jsonschema
 import pytest
 
-from app.adapters.llm import ProviderConfigurationError, ProviderResponse
+from app.adapters.llm import (
+    ModelOutputTruncatedError,
+    ProviderConfigurationError,
+    ProviderResponse,
+)
 from app.adapters.llm.deepseek import DeepSeekProvider
 from app.api.dto import (
     ChartResultDTO,
@@ -103,8 +107,18 @@ class _MockProvider:
 
     def complete_json(self, **kwargs: Any) -> ProviderResponse:
         self.last_input = kwargs["input_payload"]
+        schema = kwargs["schema"]
+        payload = self.payload
+        if schema.get("$id") == "analysis-repair-v1":
+            targets = kwargs["input_payload"]["repair_targets"]
+            payload = {
+                "schema_version": "analysis-repair-v1",
+                "replacement_fields": {name: self.payload[name] for name in targets},
+                "remove_claim_ids": [],
+                "repair_summary": "mock repair",
+            }
         return ProviderResponse(
-            payload=self.payload,
+            payload=payload,
             model_id="mock-structured-v1",
             prompt_version=kwargs["prompt_version"],
         )
@@ -125,6 +139,43 @@ class _DatasetAwareProvider:
         )
 
 
+class _LocalRepairProvider:
+    def __init__(self) -> None:
+        self.request_kinds: list[str] = []
+
+    def complete_json(self, **kwargs: Any) -> ProviderResponse:
+        schema = kwargs["schema"]
+        if schema.get("$id") == "analysis-repair-v1":
+            self.request_kinds.append("local_repair")
+            payload = {
+                "schema_version": "analysis-repair-v1",
+                "replacement_fields": {
+                    "kinship_assessment": [
+                        {"relation": name, "conclusion": "局部补全并保持原全局判断。"}
+                        for name in [
+                            "父亲",
+                            "母亲",
+                            "兄弟姐妹",
+                            "配偶婚恋",
+                            "子女",
+                            "家庭互动",
+                        ]
+                    ]
+                },
+                "remove_claim_ids": [],
+                "repair_summary": "只补全六亲章节",
+            }
+        else:
+            self.request_kinds.append("full_analysis")
+            payload = _analysis().model_dump(mode="json")
+            payload["kinship_assessment"] = []
+        return ProviderResponse(
+            payload=payload,
+            model_id="mock-local-repair-v1",
+            prompt_version=kwargs["prompt_version"],
+        )
+
+
 @pytest.mark.rag
 def test_deepseek_fails_closed_without_environment_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
@@ -133,39 +184,87 @@ def test_deepseek_fails_closed_without_environment_key(monkeypatch: pytest.Monke
 
 
 @pytest.mark.rag
-def test_deepseek_allows_slow_structured_responses(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_deepseek_uses_streaming_thinking_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     provider = DeepSeekProvider()
 
+    assert provider._model_id == "deepseek-v4-pro"
+    assert provider._thinking_enabled is True
     assert provider._timeout.connect == 15.0
-    assert provider._timeout.read == 180.0
+    assert provider._timeout.read == 90.0
+    assert provider._total_timeout_seconds == 600.0
 
 
 @pytest.mark.rag
-def test_deepseek_retries_a_dropped_response_body(monkeypatch: pytest.MonkeyPatch) -> None:
+def _sse_response(*chunks: dict[str, Any], done: bool = True) -> httpx.Response:
+    body = "".join(
+        f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n" for chunk in chunks
+    )
+    if done:
+        body += "data: [DONE]\n\n"
+    return httpx.Response(200, text=body, headers={"content-type": "text/event-stream"})
+
+
+def test_deepseek_retries_a_dropped_stream(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     calls = 0
+    request_bodies: list[dict[str, Any]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal calls
         calls += 1
+        request_bodies.append(json.loads(request.content))
         if calls == 1:
             raise httpx.ReadError("incomplete chunked read", request=request)
-        return httpx.Response(
-            200,
-            json={"choices": [{"message": {"content": '{"status":"ok"}'}}]},
+        return _sse_response(
+            {"choices": [{"delta": {"reasoning_content": "先整体判断"}, "finish_reason": None}]},
+            {"choices": [{"delta": {"content": '{"status":"ok"}'}, "finish_reason": "stop"}]},
+            {"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 5}},
         )
 
+    events: list[dict[str, Any]] = []
     provider = DeepSeekProvider(client=httpx.Client(transport=httpx.MockTransport(handler)))
     response = provider.complete_json(
         system_prompt="test",
         input_payload={},
         schema={"type": "object"},
         prompt_version="test-v1",
+        on_stream_event=events.append,
     )
 
     assert calls == 2
+    assert request_bodies[-1]["model"] == "deepseek-v4-pro"
+    assert request_bodies[-1]["stream"] is True
+    assert request_bodies[-1]["thinking"] == {"type": "enabled"}
+    assert request_bodies[-1]["reasoning_effort"] == "high"
+    assert "temperature" not in request_bodies[-1]
     assert response.payload == {"status": "ok"}
+    assert response.reasoning_content == "先整体判断"
+    assert response.usage["prompt_tokens"] == 10
+    assert response.streamed is True
+    assert response.transport_attempts == 2
+    assert any(event["phase"] == "retrying" for event in events)
+
+
+def test_deepseek_rejects_truncated_stream(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return _sse_response(
+            {"choices": [{"delta": {"content": '{"status":'}, "finish_reason": "length"}]}
+        )
+
+    provider = DeepSeekProvider(
+        max_transport_attempts=1,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    with pytest.raises(ModelOutputTruncatedError):
+        provider.complete_json(
+            system_prompt="test",
+            input_payload={},
+            schema={"type": "object"},
+            prompt_version="test-v1",
+        )
 
 
 @pytest.mark.rag
@@ -255,6 +354,7 @@ def test_pipeline_builds_schema_valid_report_from_passed_analysis_only() -> None
     assert result.report["metadata"]["model_id"] == "mock-structured-v1"
     assert "normalized_time" not in (provider.last_input or {})
     assert "retrieval_context" in (provider.last_input or {})
+    assert "retrieved_evidence" not in (provider.last_input or {})
     assert (provider.last_input or {})["retrieval_policy"][
         "deterministic_engine_overrides_rag"
     ] is True
@@ -263,6 +363,28 @@ def test_pipeline_builds_schema_valid_report_from_passed_analysis_only() -> None
         (ROOT / "contracts" / "schemas" / "report.schema.json").read_text(encoding="utf-8")
     )
     jsonschema.validate(result.report, schema)
+
+
+@pytest.mark.rag
+def test_pipeline_repairs_only_the_missing_core_section() -> None:
+    provider = _LocalRepairProvider()
+    result = AnalysisPipeline(provider=provider, retriever=_evidence()).run(
+        chart=_chart(), user_focus=("引用必须可追溯",), max_revisions=1
+    )
+
+    assert result.validation.status == "passed"
+    assert result.report is not None
+    assert provider.request_kinds == ["full_analysis", "local_repair"]
+    assert len(result.analysis.kinship_assessment) == 6
+    assert len(result.analysis.health_assessment) == 6
+    assert result.analysis.claims[0].claim_id == "CLAIM-1"
+    assert [item["request_kind"] for item in result.generation_trace["attempts"]] == [
+        "full_analysis",
+        "local_repair",
+    ]
+    repair_input = result.generation_trace["attempts"][1]["input_payload"]
+    assert repair_input["repair_targets"] == ["kinship_assessment"]
+    assert "retrieved_evidence" not in repair_input
 
 
 @pytest.mark.rag

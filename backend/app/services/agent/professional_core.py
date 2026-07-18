@@ -20,7 +20,12 @@ from .professional import (
     reflection_feedback,
     reflection_requires_revision,
 )
-from .prompts import INTERPRETER_PROMPT_VERSION, INTERPRETER_SYSTEM_PROMPT
+from .prompts import (
+    INTERPRETER_PROMPT_VERSION,
+    INTERPRETER_SYSTEM_PROMPT,
+    LOCAL_REPAIR_PROMPT_VERSION,
+    LOCAL_REPAIR_SYSTEM_PROMPT,
+)
 from .report import ReportAssembler
 from .verifier import verify_analysis
 
@@ -58,6 +63,214 @@ _REVISION_GUIDANCE = {
     "MISSING_HEALTH_ASSESSMENT": "补全五行偏性、寒暖燥湿、传统脏腑象义、保护因素、大运变化和生活建议六项。",
     "INCOMPLETE_DAYUN_ASSESSMENT": "从出生至起运开始，并按 dayun_table 原顺序逐柱补全全部大运。",
 }
+
+_REPAIRABLE_FIELDS = frozenset(
+    {
+        "executive_summary",
+        "reasoning_summary",
+        "structure_assessment",
+        "temporal_assessment",
+        "kinship_assessment",
+        "health_assessment",
+        "dayun_assessment",
+        "claims",
+        "reflection",
+        "limitations",
+    }
+)
+
+
+def _repair_targets(
+    analysis: StructuredAnalysisDTO, validation: ValidationResultDTO
+) -> set[str]:
+    targets: set[str] = set()
+    for error in validation.errors:
+        code = str(error.get("code", ""))
+        if code == "MISSING_KINSHIP_ASSESSMENT":
+            targets.add("kinship_assessment")
+        elif code == "MISSING_HEALTH_ASSESSMENT":
+            targets.add("health_assessment")
+        elif code == "INCOMPLETE_DAYUN_ASSESSMENT":
+            targets.add("dayun_assessment")
+        elif error.get("claim_id") or code in {
+            "UNKNOWN_FACT",
+            "UNKNOWN_RULE",
+            "UNKNOWN_EVIDENCE",
+            "MISSING_INTERPRETIVE_SUPPORT",
+            "NON_AUTHORITATIVE_RULE",
+            "CLAIM_SCHOOL_MISMATCH",
+            "POLICY_HIGH_RISK_ASSERTION",
+        }:
+            targets.add("claims")
+        elif code == "SCHOOL_MISMATCH":
+            # The immutable school field is repaired by a full rewrite because it is
+            # intentionally not exposed as a patchable semantic section.
+            return set()
+
+    reflection = analysis.reflection
+    if reflection is not None and reflection.status == "revise":
+        reflection_text = " ".join(
+            [
+                *reflection.missing_dimensions,
+                *reflection.contradictions,
+                *reflection.revision_instructions,
+            ]
+        )
+        keyword_targets = {
+            "六亲": "kinship_assessment",
+            "父母": "kinship_assessment",
+            "婚恋": "kinship_assessment",
+            "健康": "health_assessment",
+            "脏腑": "health_assessment",
+            "大运": "dayun_assessment",
+            "岁运": "temporal_assessment",
+            "格局": "structure_assessment",
+            "喜用": "structure_assessment",
+            "强弱": "structure_assessment",
+            "摘要": "executive_summary",
+            "推理": "reasoning_summary",
+            "引用": "claims",
+        }
+        mapped_reflection_targets = {
+            field_name
+            for keyword, field_name in keyword_targets.items()
+            if keyword in reflection_text
+        }
+        if reflection_text.strip() and not mapped_reflection_targets:
+            return set()
+        targets.update(mapped_reflection_targets)
+        if targets:
+            targets.add("reflection")
+    return targets & _REPAIRABLE_FIELDS
+
+
+def _local_repair_schema(
+    analysis_schema: dict[str, Any], targets: set[str]
+) -> dict[str, Any]:
+    source_properties = analysis_schema.get("properties", {})
+    replacement_properties = {
+        name: source_properties[name]
+        for name in sorted(targets)
+        if isinstance(source_properties, dict) and name in source_properties
+    }
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "analysis-repair-v1",
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "schema_version",
+            "replacement_fields",
+            "remove_claim_ids",
+            "repair_summary",
+        ],
+        "properties": {
+            "schema_version": {"const": "analysis-repair-v1"},
+            "replacement_fields": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": sorted(replacement_properties),
+                "properties": replacement_properties,
+            },
+            "remove_claim_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "repair_summary": {"type": "string"},
+        },
+    }
+
+
+def _build_local_repair_payload(
+    *,
+    base_payload: dict[str, Any],
+    analysis: StructuredAnalysisDTO,
+    validation: ValidationResultDTO,
+    targets: set[str],
+) -> dict[str, Any]:
+    candidate = analysis.model_dump(mode="json")
+    return {
+        "chart_id": base_payload["chart_id"],
+        "analysis_context": base_payload["analysis_context"],
+        "retrieval_context": base_payload["retrieval_context"],
+        "retrieval_policy": base_payload["retrieval_policy"],
+        "analysis_profile": base_payload["analysis_profile"],
+        "allowed_reference_ids": base_payload["allowed_reference_ids"],
+        "core_topic_contract": base_payload["core_topic_contract"],
+        "user_focus": base_payload["user_focus"],
+        "repair_targets": sorted(targets),
+        "global_analysis_state": {
+            "executive_summary": candidate.get("executive_summary"),
+            "reasoning_summary": candidate.get("reasoning_summary", []),
+            "structure_assessment": candidate.get("structure_assessment"),
+            "temporal_assessment": candidate.get("temporal_assessment", []),
+        },
+        "candidate_analysis": candidate,
+        "validation_errors": validation.errors,
+        "required_revisions": validation.required_revisions,
+        "revision_guidance": [
+            _REVISION_GUIDANCE.get(code, code)
+            for code in validation.required_revisions
+        ],
+        "reflection_feedback": reflection_feedback(analysis),
+    }
+
+
+def _apply_local_repair(
+    *,
+    analysis: StructuredAnalysisDTO,
+    repair_payload: dict[str, Any],
+    targets: set[str],
+) -> dict[str, Any]:
+    allowed_top_level = {
+        "schema_version",
+        "replacement_fields",
+        "remove_claim_ids",
+        "repair_summary",
+    }
+    if set(repair_payload) - allowed_top_level:
+        raise AnalysisPipelineError(
+            "provider added fields outside the local repair contract",
+            safe_details={"required_revisions": ["LOCAL_REPAIR_SCOPE_VIOLATION"]},
+        )
+    if repair_payload.get("schema_version") != "analysis-repair-v1":
+        raise AnalysisPipelineError(
+            "provider output violates local repair schema",
+            safe_details={"required_revisions": ["LOCAL_REPAIR_SCHEMA_INVALID"]},
+        )
+    replacements = repair_payload.get("replacement_fields")
+    if not isinstance(replacements, dict) or not targets <= set(replacements):
+        raise AnalysisPipelineError(
+            "provider omitted requested local repair fields",
+            safe_details={
+                "required_revisions": ["LOCAL_REPAIR_FIELDS_MISSING"],
+                "repair_targets": sorted(targets),
+            },
+        )
+    if set(replacements) - targets:
+        raise AnalysisPipelineError(
+            "provider attempted to modify frozen report fields",
+            safe_details={"required_revisions": ["LOCAL_REPAIR_SCOPE_VIOLATION"]},
+        )
+    merged = analysis.model_dump(mode="json")
+    for field_name, value in replacements.items():
+        merged[field_name] = value
+    remove_ids_raw = repair_payload.get("remove_claim_ids", [])
+    remove_ids = (
+        {str(item) for item in remove_ids_raw}
+        if isinstance(remove_ids_raw, list)
+        else set()
+    )
+    if remove_ids:
+        claims = merged.get("claims", [])
+        if isinstance(claims, list):
+            merged["claims"] = [
+                claim
+                for claim in claims
+                if not isinstance(claim, dict)
+                or str(claim.get("claim_id", "")) not in remove_ids
+            ]
+    return merged
 
 
 def _relations(chart: ChartResultDTO) -> list[dict[str, Any]]:
@@ -310,13 +523,14 @@ class AnalysisPipeline:
         self.retriever = retriever
         self.report_assembler = ReportAssembler()
 
-    def run(
+    def run(  # noqa: PLR0915
         self,
         *,
         chart: ChartResultDTO,
         user_focus: tuple[str, ...],
         school: str = "engineering_policy",
         on_stage: Callable[[str], None] | None = None,
+        on_model_progress: Callable[[dict[str, Any]], None] | None = None,
         max_revisions: int = 2,
     ) -> AnalysisPipelineResult:
         if chart.calculation_status != "passed":
@@ -365,7 +579,6 @@ class AnalysisPipeline:
             "chart_id": chart.chart_id,
             "calculation_profile_id": chart.calculation_profile_id,
             "analysis_context": context,
-            "retrieved_evidence": [_serialize(item) for item in evidence],
             "retrieval_context": grouped,
             "retrieval_policy": {
                 "deterministic_engine_overrides_rag": True,
@@ -412,19 +625,41 @@ class AnalysisPipeline:
         }
 
         response: ProviderResponse | None = None
+        primary_response: ProviderResponse | None = None
         analysis: StructuredAnalysisDTO | None = None
         validation: ValidationResultDTO | None = None
         attempts: list[dict[str, Any]] = []
+        candidate_payload: dict[str, Any] | None = None
+        request_kind = "full_analysis"
+        request_payload = payload
+        request_schema = schema
+        request_system_prompt = INTERPRETER_SYSTEM_PROMPT
+        request_prompt_version = INTERPRETER_PROMPT_VERSION
+        repair_targets: set[str] = set()
+
         for attempt in range(max_revisions + 1):
             if on_stage:
                 on_stage("interpreting")
             response = self.provider.complete_json(
-                system_prompt=INTERPRETER_SYSTEM_PROMPT,
-                input_payload=payload,
-                schema=schema,
-                prompt_version=INTERPRETER_PROMPT_VERSION,
+                system_prompt=request_system_prompt,
+                input_payload=request_payload,
+                schema=request_schema,
+                prompt_version=request_prompt_version,
+                on_stream_event=on_model_progress,
             )
-            analysis, schema_repairs = _validate_provider_payload(response.payload)
+            if primary_response is None:
+                primary_response = response
+            if request_kind == "local_repair":
+                assert analysis is not None
+                candidate_payload = _apply_local_repair(
+                    analysis=analysis,
+                    repair_payload=response.payload,
+                    targets=repair_targets,
+                )
+            else:
+                candidate_payload = response.payload
+
+            analysis, schema_repairs = _validate_provider_payload(candidate_payload)
             if on_stage:
                 on_stage("verifying")
             validation = verify_analysis(
@@ -440,8 +675,18 @@ class AnalysisPipeline:
             attempts.append(
                 {
                     "attempt": attempt + 1,
-                    "input_payload": payload,
+                    "request_kind": request_kind,
+                    "system_prompt": request_system_prompt,
+                    "prompt_version": request_prompt_version,
+                    "input_payload": request_payload,
                     "model_output": response.payload,
+                    "candidate_analysis_after_attempt": candidate_payload,
+                    "provider_reasoning_content": response.reasoning_content,
+                    "provider_usage": response.usage,
+                    "provider_finish_reason": response.finish_reason,
+                    "provider_streamed": response.streamed,
+                    "provider_transport_attempts": response.transport_attempts,
+                    "provider_timings": response.timings,
                     "schema_repairs": schema_repairs,
                     "validation": validation.model_dump(mode="json"),
                     "reflection": analysis.reflection.model_dump(mode="json")
@@ -450,25 +695,49 @@ class AnalysisPipeline:
                 }
             )
             reflection_failed = reflection_requires_revision(analysis)
-            if (
-                validation.status == "passed" and not reflection_failed
-            ) or attempt == max_revisions:
+            if (validation.status == "passed" and not reflection_failed) or attempt == max_revisions:
                 break
             if on_stage:
                 on_stage("revision_pending")
-            payload = {
-                **payload,
-                "previous_analysis": analysis.model_dump(mode="json"),
-                "reflection_feedback": reflection_feedback(analysis),
-                "required_revisions": validation.required_revisions,
-                "validation_errors": validation.errors,
-                "revision_guidance": [
-                    _REVISION_GUIDANCE.get(code, code)
-                    for code in validation.required_revisions
-                ],
-            }
 
-        assert response is not None and analysis is not None and validation is not None
+            repair_targets = _repair_targets(analysis, validation)
+            if repair_targets:
+                request_kind = "local_repair"
+                request_payload = _build_local_repair_payload(
+                    base_payload=payload,
+                    analysis=analysis,
+                    validation=validation,
+                    targets=repair_targets,
+                )
+                request_schema = _local_repair_schema(schema, repair_targets)
+                request_system_prompt = LOCAL_REPAIR_SYSTEM_PROMPT
+                request_prompt_version = LOCAL_REPAIR_PROMPT_VERSION
+            else:
+                # Rare cross-cutting failures still use a coherent full rewrite.  The
+                # initial call remains a single global analysis; this fallback exists
+                # only when the validator cannot safely isolate a section.
+                request_kind = "full_revision"
+                request_payload = {
+                    **payload,
+                    "previous_analysis": analysis.model_dump(mode="json"),
+                    "reflection_feedback": reflection_feedback(analysis),
+                    "required_revisions": validation.required_revisions,
+                    "validation_errors": validation.errors,
+                    "revision_guidance": [
+                        _REVISION_GUIDANCE.get(code, code)
+                        for code in validation.required_revisions
+                    ],
+                }
+                request_schema = schema
+                request_system_prompt = INTERPRETER_SYSTEM_PROMPT
+                request_prompt_version = INTERPRETER_PROMPT_VERSION
+
+        assert (
+            response is not None
+            and primary_response is not None
+            and analysis is not None
+            and validation is not None
+        )
         analysis, validation = _salvage(
             chart=chart,
             evidence=evidence,
@@ -486,15 +755,15 @@ class AnalysisPipeline:
                 analysis=analysis,
                 validation=validation,
                 evidence=evidence,
-                prompt_version=response.prompt_version,
-                model_id=response.model_id,
+                prompt_version=primary_response.prompt_version,
+                model_id=primary_response.model_id,
                 retrieval_trace_id=trace_id,
             )
         generation_trace = {
             "trace_type": "report_analysis",
             "retrieval_trace_id": trace_id,
-            "prompt_version": response.prompt_version,
-            "model_id": response.model_id,
+            "prompt_version": primary_response.prompt_version,
+            "model_id": primary_response.model_id,
             "system_prompt": INTERPRETER_SYSTEM_PROMPT,
             "retrieval_plan": {
                 "queries": list(plan.queries),
@@ -512,7 +781,7 @@ class AnalysisPipeline:
             evidence=evidence,
             report=report,
             retrieval_trace_id=trace_id,
-            model_id=response.model_id,
-            prompt_version=response.prompt_version,
+            model_id=primary_response.model_id,
+            prompt_version=primary_response.prompt_version,
             generation_trace=generation_trace,
         )
