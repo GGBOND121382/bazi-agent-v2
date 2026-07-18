@@ -223,10 +223,14 @@ def test_deepseek_retries_a_dropped_stream(monkeypatch: pytest.MonkeyPatch) -> N
         )
 
     events: list[dict[str, Any]] = []
-    provider = DeepSeekProvider(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    traces: list[dict[str, Any]] = []
+    provider = DeepSeekProvider(
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        trace_sink=traces.append,
+    )
     response = provider.complete_json(
-        system_prompt="test",
-        input_payload={},
+        system_prompt="trace-system-prompt",
+        input_payload={"chart_id": "chart_test"},
         schema={"type": "object"},
         prompt_version="test-v1",
         on_stream_event=events.append,
@@ -244,19 +248,30 @@ def test_deepseek_retries_a_dropped_stream(monkeypatch: pytest.MonkeyPatch) -> N
     assert response.streamed is True
     assert response.transport_attempts == 2
     assert any(event["phase"] == "retrying" for event in events)
+    assert [trace["status"] for trace in traces] == ["failed", "succeeded"]
+    assert traces[0]["error"]["type"] == "ReadError"
+    assert traces[1]["request"]["system_prompt"] == "trace-system-prompt"
+    assert traces[1]["request"]["input_payload"] == {"chart_id": "chart_test"}
+    assert traces[1]["request"]["required_schema"] == {"type": "object"}
+    assert traces[1]["response"]["parsed_payload"] == {"status": "ok"}
+    assert traces[1]["response"]["reasoning_content"] == response.reasoning_content
+    assert "test-key" not in json.dumps(traces, ensure_ascii=False)
 
 
 def test_deepseek_rejects_truncated_stream(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    traces: list[dict[str, Any]] = []
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return _sse_response(
+            {"choices": [{"delta": {"reasoning_content": "partial-reasoning"}}]},
             {"choices": [{"delta": {"content": '{"status":'}, "finish_reason": "length"}]}
         )
 
     provider = DeepSeekProvider(
         max_transport_attempts=1,
         client=httpx.Client(transport=httpx.MockTransport(handler)),
+        trace_sink=traces.append,
     )
     with pytest.raises(ModelOutputTruncatedError):
         provider.complete_json(
@@ -265,6 +280,10 @@ def test_deepseek_rejects_truncated_stream(monkeypatch: pytest.MonkeyPatch) -> N
             schema={"type": "object"},
             prompt_version="test-v1",
         )
+    assert traces[0]["status"] == "failed"
+    assert traces[0]["response"]["reasoning_content"] == "partial-reasoning"
+    assert traces[0]["response"]["content"] == '{"status":'
+    assert traces[0]["error"]["type"] == "ModelOutputTruncatedError"
 
 
 @pytest.mark.rag
@@ -478,6 +497,45 @@ def test_pipeline_salvages_only_claims_that_pass_the_deterministic_gate() -> Non
         if str(block["claim_id"]).startswith("CLAIM-")
     }
     assert report_claim_ids == {"CLAIM-1"}
+
+
+@pytest.mark.rag
+def test_pipeline_salvages_bad_claim_and_lists_missing_deterministic_dayun() -> None:
+    payload = _analysis().model_dump(mode="json")
+    payload["dayun_assessment"][0]["conclusion"] += " 2000 年后仍须逐步核对。"
+    payload["claims"].append(
+        {
+            **payload["claims"][0],
+            "claim_id": "CLAIM-INVALID-DAYUN",
+            "fact_ids": ["FACT-NOT-REAL"],
+            "rule_ids": [],
+            "evidence_ids": [],
+        }
+    )
+    chart = _chart().model_copy(
+        update={
+            "dayun": [
+                {
+                    "index": 1,
+                    "start_year": 2000,
+                    "end_year": 2009,
+                    "ganzhi": "丁亥",
+                    "fact_id": "DAYUN-1",
+                    "rule_id": "DAYUN-LUNAR-PYTHON-V2",
+                }
+            ]
+        }
+    )
+
+    result = AnalysisPipeline(
+        provider=_MockProvider(payload), retriever=_evidence()
+    ).run(chart=chart, user_focus=("引用必须可追溯",), max_revisions=0)
+
+    assert result.validation.status == "passed"
+    assert result.report is not None
+    assert [claim.claim_id for claim in result.analysis.claims] == ["CLAIM-1"]
+    assert any("丁亥" in str(item.get("stage")) for item in result.analysis.dayun_assessment)
+    assert any("确定性排盘信息" in item for item in result.analysis.limitations)
 
 
 @pytest.mark.rag

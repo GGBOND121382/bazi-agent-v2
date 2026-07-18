@@ -2,15 +2,22 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 import httpx
 
+from ...logging_setup import append_llm_trace
+
 StreamEventCallback = Callable[[dict[str, Any]], None]
+TraceSink = Callable[[dict[str, Any]], None]
+logger = logging.getLogger(__name__)
 
 
 class ModelProviderError(RuntimeError):
@@ -56,6 +63,18 @@ class ProviderResponse:
     timings: dict[str, float] = field(default_factory=dict)
 
 
+@dataclass(slots=True)
+class _AttemptCapture:
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    started_monotonic: float = field(default_factory=time.monotonic)
+    first_chunk_at: float | None = None
+    reasoning_parts: list[str] = field(default_factory=list)
+    content_parts: list[str] = field(default_factory=list)
+    usage: dict[str, Any] = field(default_factory=dict)
+    finish_reason: str | None = None
+    stream_done: bool = False
+
+
 class StructuredOutputProvider(Protocol):
     def complete_json(
         self,
@@ -80,6 +99,7 @@ class DeepSeekProvider:
         total_timeout_seconds: float | None = None,
         max_transport_attempts: int | None = None,
         client: httpx.Client | None = None,
+        trace_sink: TraceSink | None = None,
     ) -> None:
         api_key = os.environ.get("DEEPSEEK_API_KEY")
         if not api_key:
@@ -103,6 +123,7 @@ class DeepSeekProvider:
         self._reasoning_effort = os.environ.get("DEEPSEEK_REASONING_EFFORT", "high")
         self._max_tokens = int(os.environ.get("DEEPSEEK_MAX_TOKENS", "65536"))
         self._client = client or httpx.Client()
+        self._trace_sink = trace_sink or append_llm_trace
 
     def complete_json(
         self,
@@ -139,22 +160,40 @@ class DeepSeekProvider:
 
         last_error: BaseException | None = None
         deadline = time.monotonic() + self._total_timeout_seconds
+        provider_call_id = f"provider_{uuid.uuid4().hex[:12]}"
         for attempt in range(1, self._max_transport_attempts + 1):
             if time.monotonic() >= deadline:
                 raise ModelTimeoutError("DeepSeek total generation deadline exceeded")
             if on_stream_event:
                 on_stream_event({"phase": "request_started", "attempt": attempt})
+            capture = _AttemptCapture()
             try:
-                return self._complete_stream_attempt(
+                result = self._complete_stream_attempt(
                     request_body=request_body,
                     prompt_version=prompt_version,
                     attempt=attempt,
                     deadline=deadline,
                     on_stream_event=on_stream_event,
+                    capture=capture,
                 )
-            except ModelOutputTruncatedError:
-                raise
-            except (httpx.TimeoutException, httpx.TransportError, ModelStreamInterruptedError) as exc:
+            except Exception as exc:
+                self._write_attempt_trace(
+                    provider_call_id=provider_call_id,
+                    attempt=attempt,
+                    system_prompt=system_prompt,
+                    input_payload=input_payload,
+                    schema=schema,
+                    prompt_version=prompt_version,
+                    request_options={k: v for k, v in request_body.items() if k != "messages"},
+                    capture=capture,
+                    error=exc,
+                )
+                if isinstance(exc, ModelOutputTruncatedError):
+                    raise
+                if not isinstance(
+                    exc, (httpx.TimeoutException, httpx.TransportError, ModelStreamInterruptedError)
+                ):
+                    raise
                 last_error = exc
                 if attempt >= self._max_transport_attempts:
                     break
@@ -167,10 +206,97 @@ class DeepSeekProvider:
                         }
                     )
                 time.sleep(min(2.0 * attempt, 5.0))
+            else:
+                self._write_attempt_trace(
+                    provider_call_id=provider_call_id,
+                    attempt=attempt,
+                    system_prompt=system_prompt,
+                    input_payload=input_payload,
+                    schema=schema,
+                    prompt_version=prompt_version,
+                    request_options={k: v for k, v in request_body.items() if k != "messages"},
+                    capture=capture,
+                    response=result,
+                )
+                return result
 
         if isinstance(last_error, httpx.TimeoutException):
             raise ModelTimeoutError("DeepSeek stream timed out") from last_error
         raise ModelStreamInterruptedError("DeepSeek stream was interrupted") from last_error
+
+    def _write_attempt_trace(
+        self,
+        *,
+        provider_call_id: str,
+        attempt: int,
+        system_prompt: str,
+        input_payload: dict[str, Any],
+        schema: dict[str, Any],
+        prompt_version: str,
+        request_options: dict[str, Any],
+        capture: _AttemptCapture,
+        response: ProviderResponse | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        finished_at = datetime.now(UTC)
+        finished_monotonic = time.monotonic()
+        reasoning_content = "".join(capture.reasoning_parts)
+        content = "".join(capture.content_parts)
+        first_chunk_seconds = (
+            round(capture.first_chunk_at - capture.started_monotonic, 3)
+            if capture.first_chunk_at is not None
+            else None
+        )
+        error_record: dict[str, Any] | None = None
+        if error is not None:
+            cause = error.__cause__
+            error_record = {
+                "type": type(error).__name__,
+                "message": str(error),
+                "error_code": getattr(error, "error_code", None),
+                "retryable": getattr(error, "retryable", None),
+                "cause_type": type(cause).__name__ if cause is not None else None,
+                "cause_message": str(cause) if cause is not None else None,
+            }
+        trace = {
+            "schema_version": "llm-provider-request-trace-v1",
+            "trace_type": "provider_request",
+            "call_id": provider_call_id,
+            "request_id": f"{provider_call_id}_attempt_{attempt}",
+            "provider": "deepseek",
+            "model_id": self._model_id,
+            "prompt_version": prompt_version,
+            "attempt": attempt,
+            "status": "succeeded" if response is not None else "failed",
+            "started_at": capture.started_at.isoformat(),
+            "finished_at": finished_at.isoformat(),
+            "request": {
+                "endpoint": f"{self._base_url}/chat/completions",
+                "system_prompt": system_prompt,
+                "input_payload": input_payload,
+                "required_schema": schema,
+                "options": request_options,
+            },
+            "response": {
+                "reasoning_content": reasoning_content,
+                "content": content,
+                "parsed_payload": response.payload if response is not None else None,
+                "usage": capture.usage,
+                "finish_reason": capture.finish_reason,
+                "stream_done": capture.stream_done,
+            },
+            "error": error_record,
+            "timings": {
+                "time_to_first_chunk_seconds": first_chunk_seconds,
+                "total_seconds": round(finished_monotonic - capture.started_monotonic, 3),
+            },
+        }
+        try:
+            self._trace_sink(trace)
+        except Exception:
+            logger.exception(
+                "llm_trace_write_failed call_id=%s attempt=%s", provider_call_id, attempt
+            )
 
     def _complete_stream_attempt(  # noqa: PLR0915
         self,
@@ -180,16 +306,11 @@ class DeepSeekProvider:
         attempt: int,
         deadline: float,
         on_stream_event: StreamEventCallback | None,
+        capture: _AttemptCapture,
     ) -> ProviderResponse:
-        started = time.monotonic()
-        first_chunk_at: float | None = None
-        reasoning_parts: list[str] = []
-        content_parts: list[str] = []
+        started = capture.started_monotonic
         reasoning_chars = 0
         content_chars = 0
-        usage: dict[str, Any] = {}
-        finish_reason: str | None = None
-        done = False
 
         try:
             with self._client.stream(
@@ -212,17 +333,17 @@ class DeepSeekProvider:
                         continue
                     data = line[5:].strip()
                     if data == "[DONE]":
-                        done = True
+                        capture.stream_done = True
                         break
                     try:
                         chunk = json.loads(data)
                     except json.JSONDecodeError as exc:
                         raise ModelStreamInterruptedError("DeepSeek returned malformed SSE data") from exc
-                    if first_chunk_at is None:
-                        first_chunk_at = now
+                    if capture.first_chunk_at is None:
+                        capture.first_chunk_at = now
                     chunk_usage = chunk.get("usage")
                     if isinstance(chunk_usage, dict):
-                        usage = dict(chunk_usage)
+                        capture.usage = dict(chunk_usage)
                     choices = chunk.get("choices")
                     if not isinstance(choices, list) or not choices:
                         continue
@@ -230,17 +351,17 @@ class DeepSeekProvider:
                     if not isinstance(choice, dict):
                         continue
                     if choice.get("finish_reason") is not None:
-                        finish_reason = str(choice["finish_reason"])
+                        capture.finish_reason = str(choice["finish_reason"])
                     delta = choice.get("delta")
                     if not isinstance(delta, dict):
                         continue
                     reasoning_delta = delta.get("reasoning_content")
                     content_delta = delta.get("content")
                     if isinstance(reasoning_delta, str) and reasoning_delta:
-                        reasoning_parts.append(reasoning_delta)
+                        capture.reasoning_parts.append(reasoning_delta)
                         reasoning_chars += len(reasoning_delta)
                     if isinstance(content_delta, str) and content_delta:
-                        content_parts.append(content_delta)
+                        capture.content_parts.append(content_delta)
                         content_chars += len(content_delta)
                     if on_stream_event and (reasoning_delta or content_delta):
                         on_stream_event(
@@ -261,13 +382,13 @@ class DeepSeekProvider:
         except httpx.RemoteProtocolError as exc:
             raise ModelStreamInterruptedError("DeepSeek closed the chunked response early") from exc
 
-        if not done:
+        if not capture.stream_done:
             raise ModelStreamInterruptedError("DeepSeek stream ended before [DONE]")
-        if finish_reason == "length":
+        if capture.finish_reason == "length":
             raise ModelOutputTruncatedError("DeepSeek output reached the token limit")
 
-        content = "".join(content_parts).strip()
-        reasoning_content = "".join(reasoning_parts)
+        content = "".join(capture.content_parts).strip()
+        reasoning_content = "".join(capture.reasoning_parts)
         if not content:
             raise ModelInvalidOutputError("DeepSeek returned an empty final answer")
         try:
@@ -279,7 +400,7 @@ class DeepSeekProvider:
 
         finished = time.monotonic()
         timings = {
-            "time_to_first_chunk_seconds": round((first_chunk_at or finished) - started, 3),
+            "time_to_first_chunk_seconds": round((capture.first_chunk_at or finished) - started, 3),
             "total_seconds": round(finished - started, 3),
         }
         if on_stream_event:
@@ -289,8 +410,8 @@ class DeepSeekProvider:
                     "attempt": attempt,
                     "reasoning_chars": len(reasoning_content),
                     "content_chars": len(content),
-                    "finish_reason": finish_reason,
-                    "usage": usage,
+                    "finish_reason": capture.finish_reason,
+                    "usage": capture.usage,
                     "timings": timings,
                 }
             )
@@ -299,8 +420,8 @@ class DeepSeekProvider:
             model_id=self._model_id,
             prompt_version=prompt_version,
             reasoning_content=reasoning_content,
-            usage=usage,
-            finish_reason=finish_reason,
+            usage=capture.usage,
+            finish_reason=capture.finish_reason,
             streamed=True,
             transport_attempts=attempt,
             timings=timings,

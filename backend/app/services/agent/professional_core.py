@@ -500,6 +500,62 @@ def _enforce_core_topic_coverage(
     )
 
 
+def _supplement_deterministic_dayun_stages(
+    chart: ChartResultDTO, analysis: StructuredAnalysisDTO
+) -> StructuredAnalysisDTO:
+    """List missing deterministic dayun stages without inventing an interpretation."""
+    dayun = chart.dayun or []
+    if not dayun:
+        return analysis
+
+    items = list(analysis.dayun_assessment)
+    searchable_stages = [str(item.get("stage", "")).casefold() for item in items]
+    additions: list[dict[str, Any]] = []
+    if not any(
+        "起运" in stage or "qiyun" in stage or "birth" in stage
+        for stage in searchable_stages
+    ):
+        additions.append(
+            {
+                "stage": "出生至起运",
+                "conclusion": "仅列示确定性起运前阶段；扩展解读未通过校验，暂不作趋势断言。",
+                "fact_ids": [],
+                "rule_ids": [],
+                "evidence_ids": [],
+            }
+        )
+
+    for item in dayun:
+        markers = [
+            str(item.get("ganzhi", "")).casefold(),
+            str(item.get("fact_id", "")).casefold(),
+        ]
+        if any(marker and marker in stage for marker in markers for stage in searchable_stages):
+            continue
+        ganzhi = str(item.get("ganzhi", "大运"))
+        start_year = item.get("start_year")
+        end_year = item.get("end_year")
+        additions.append(
+            {
+                "stage": f"{ganzhi}大运（{start_year}—{end_year}）",
+                "conclusion": "仅列示确定性排盘阶段；扩展解读未通过校验，暂不作趋势断言。",
+                "fact_ids": [str(item["fact_id"])] if item.get("fact_id") else [],
+                "rule_ids": [str(item["rule_id"])] if item.get("rule_id") else [],
+                "evidence_ids": [],
+            }
+        )
+
+    if not additions:
+        return analysis
+    limitation = "部分大运阶段仅保留确定性排盘信息，未作未经校验的扩展解读。"
+    limitations = list(analysis.limitations)
+    if limitation not in limitations:
+        limitations.append(limitation)
+    return analysis.model_copy(
+        update={"dayun_assessment": [*items, *additions], "limitations": limitations}
+    )
+
+
 def _salvage(
     *,
     chart: ChartResultDTO,
@@ -511,19 +567,31 @@ def _salvage(
 ) -> tuple[StructuredAnalysisDTO, ValidationResultDTO]:
     if validation.status == "passed":
         return analysis, validation
-    if any(not error.get("claim_id") for error in validation.errors):
-        return analysis, validation
+
+    cleaned = analysis
     rejected = {str(e["claim_id"]) for e in validation.errors if e.get("claim_id")}
     remaining = [claim for claim in analysis.claims if claim.claim_id not in rejected]
-    if not rejected or not remaining:
+    if rejected and remaining:
+        limitations = list(cleaned.limitations)
+        limitations.append(
+            f"已移除 {len(rejected)} 条未通过确定性引用校验的模型结论。"
+        )
+        cleaned = cleaned.model_copy(update={"claims": remaining, "limitations": limitations})
+
+    if "INCOMPLETE_DAYUN_ASSESSMENT" in validation.required_revisions:
+        cleaned = _supplement_deterministic_dayun_stages(chart, cleaned)
+    if cleaned is analysis:
         return analysis, validation
-    cleaned = analysis.model_copy(update={"claims": remaining})
-    return cleaned, verify_analysis(
+
+    repaired_validation = verify_analysis(
         chart=chart,
         evidence=evidence,
         analysis=cleaned,
         configured_school=school,
         computed_relations=relations,
+    )
+    return cleaned, _enforce_core_topic_coverage(
+        chart=chart, analysis=cleaned, validation=repaired_validation
     )
 
 

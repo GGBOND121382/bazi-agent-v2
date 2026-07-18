@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ from typing import Any
 from .persistence import log_dir
 
 _CONFIGURED = False
+_TRACE_LOCK = threading.Lock()
 
 
 def configure_logging() -> None:
@@ -38,5 +40,7 @@ def configure_logging() -> None:
 
 def append_llm_trace(trace: dict[str, Any]) -> None:
     path: Path = log_dir() / "llm_calls.jsonl"
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(trace, ensure_ascii=False, default=str) + "\n")
+    line = json.dumps(trace, ensure_ascii=False, default=str) + "\n"
+    with _TRACE_LOCK, path.open("a", encoding="utf-8") as handle:
+        handle.write(line)
+        handle.flush()
