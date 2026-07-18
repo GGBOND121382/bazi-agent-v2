@@ -411,6 +411,22 @@ def test_pipeline_discards_one_malformed_claim_instead_of_failing_the_job() -> N
 
 
 @pytest.mark.rag
+def test_pipeline_defaults_omitted_empty_evidence_ids_without_inventing_citations() -> None:
+    payload = _analysis().model_dump(mode="json")
+    payload["claims"][0].pop("evidence_ids")
+
+    result = AnalysisPipeline(
+        provider=_MockProvider(payload), retriever=_evidence()
+    ).run(chart=_chart(), user_focus=("引用必须可追溯",), max_revisions=0)
+
+    assert result.validation.status == "passed"
+    assert result.analysis.claims[0].evidence_ids == []
+    repair = result.generation_trace["attempts"][0]["schema_repairs"][0]
+    assert repair["code"] == "DEFAULTED_EMPTY_CLAIM_REFERENCES"
+    assert repair["fields"] == ["evidence_ids"]
+
+
+@pytest.mark.rag
 def test_pipeline_runs_end_to_end_with_production_dataset_channels() -> None:
     pipeline = AnalysisPipeline(
         provider=_DatasetAwareProvider(),

@@ -333,13 +333,25 @@ def _discard_malformed_claims(payload: dict[str, Any]) -> tuple[dict[str, Any], 
         return payload, []
 
     valid_claims: list[dict[str, Any]] = []
-    rejected: list[dict[str, Any]] = []
+    repairs: list[dict[str, Any]] = []
+    rejected_count = 0
     for index, raw_claim in enumerate(claims):
+        candidate = dict(raw_claim) if isinstance(raw_claim, dict) else raw_claim
+        defaulted_fields: list[str] = []
+        if isinstance(candidate, dict):
+            # These reference lists are allowed to be empty. Some providers omit
+            # an empty array even when the JSON schema marks the field required.
+            # Supplying [] preserves the meaning and never invents a citation.
+            for field in ("rule_ids", "evidence_ids"):
+                if field not in candidate:
+                    candidate[field] = []
+                    defaulted_fields.append(field)
         try:
-            claim = ClaimDTO.model_validate(raw_claim)
+            claim = ClaimDTO.model_validate(candidate)
         except ValueError as exc:
             claim_id = raw_claim.get("claim_id") if isinstance(raw_claim, dict) else None
-            rejected.append(
+            rejected_count += 1
+            repairs.append(
                 {
                     "code": "INVALID_CLAIM_SCHEMA",
                     "claim_id": str(claim_id) if claim_id else None,
@@ -349,18 +361,28 @@ def _discard_malformed_claims(payload: dict[str, Any]) -> tuple[dict[str, Any], 
             )
         else:
             valid_claims.append(claim.model_dump(mode="json"))
+            if defaulted_fields:
+                repairs.append(
+                    {
+                        "code": "DEFAULTED_EMPTY_CLAIM_REFERENCES",
+                        "claim_id": claim.claim_id,
+                        "claim_index": index,
+                        "fields": defaulted_fields,
+                    }
+                )
 
     # An analysis with no valid claims should go through the normal schema-failure
     # path instead of being silently accepted as an empty report.
-    if not rejected or (claims and not valid_claims):
-        return payload, rejected
+    if not repairs or (claims and not valid_claims):
+        return payload, repairs
 
     limitations = payload.get("limitations")
     cleaned_limitations = list(limitations) if isinstance(limitations, list) else []
-    cleaned_limitations.append(
-        f"{len(rejected)} model claim(s) were omitted because they were not traceable."
-    )
-    return {**payload, "claims": valid_claims, "limitations": cleaned_limitations}, rejected
+    if rejected_count:
+        cleaned_limitations.append(
+            f"{rejected_count} model claim(s) were omitted because they were not traceable."
+        )
+    return {**payload, "claims": valid_claims, "limitations": cleaned_limitations}, repairs
 
 
 def _validate_provider_payload(
