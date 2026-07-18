@@ -19,6 +19,7 @@ import type {
 
 const REQUEST_ID_HEADER = 'X-Request-ID'
 const IDEMPOTENCY_HEADER = 'Idempotency-Key'
+const DEFAULT_API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`
 
 function uuid(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
@@ -42,7 +43,7 @@ export class BaziClient {
   private readonly fetcher: typeof fetch
 
   constructor(opts: ClientOptions = {}) {
-    this.baseUrl = (opts.baseUrl ?? '/api').replace(/\/$/, '')
+    this.baseUrl = (opts.baseUrl ?? DEFAULT_API_BASE).replace(/\/$/, '')
     this.fetcher = opts.fetcher ?? globalThis.fetch.bind(globalThis)
   }
 

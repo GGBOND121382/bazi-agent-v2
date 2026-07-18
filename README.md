@@ -53,6 +53,42 @@ npm run dev
 
 浏览器打开：<http://127.0.0.1:5173/>。点击“新建命盘”，排盘后点击“生成结构化分析”即可调用紧凑确定性 Context 和 DeepSeek。
 
+## Ubuntu 双服务一键部署
+
+`deploy-dual-services.sh` 用于在同一台 Ubuntu 服务器上同时部署本项目与 `zhongyi-diag`。它会让 Nginx 统一监听公网 `8000`，两个应用只监听本机内部端口：
+
+- `http://服务器IP:8000/`：服务入口页
+- `http://服务器IP:8000/bazi/`：八字命理智能体
+- `http://服务器IP:8000/zhongyi/`：中医问诊智能体
+
+脚本默认认为已经部署的中医项目位于 `~/zhongyi-diag`，并复用其中的 `deepseek-apikey`。在服务器执行：
+
+```bash
+git clone --branch agent/mobile-ui-deterministic-chat --single-branch \
+  https://github.com/GGBOND121382/bazi-agent-v2.git ~/bazi-agent-v2
+cd ~/bazi-agent-v2
+chmod +x deploy-dual-services.sh
+./deploy-dual-services.sh
+```
+
+脚本会安装 Nginx、Node.js、uv 与 Python 3.12，构建生产前端，注册两个 systemd 服务，并执行入口页、两个前端和 API 健康检查。首次部署会在终端显示随机生成的八字管理员密码，请立即保存并在登录后修改。
+
+如果中医项目不在默认位置，可指定：
+
+```bash
+ZHONGYI_DIR=/实际路径/zhongyi-diag ./deploy-dual-services.sh
+```
+
+部署后的常用管理命令：
+
+```bash
+sudo systemctl status bazi-agent-v2 zhongyi-diag nginx
+sudo journalctl -u bazi-agent-v2 -f
+sudo journalctl -u zhongyi-diag -f
+```
+
+公网只需放行 TCP 8000。正式录入个人或医疗信息前，应配置域名和 HTTPS。
+
 ## 登录与本地配置
 
 首次启动会自动创建管理员：

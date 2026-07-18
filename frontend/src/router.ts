@@ -14,7 +14,7 @@ import AdminPage from '@/pages/AdminPage.vue'
 import { useBaziClient } from '@/api'
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     { path: '/login', name: 'login', component: LoginPage, meta: { title: '登录', public: true } },
     { path: '/register', name: 'register', component: RegisterPage, meta: { title: '注册', public: true } },
