@@ -128,6 +128,8 @@ runtime/
 
 - [本轮迭代计划](docs/ITERATION_PLAN_CORE_TOPICS_AND_TOY_PORTAL.md)
 - [六亲、健康与全生命周期大运 Prompt 设计](docs/PROMPT_ARCHITECTURE_V6_CORE_TOPICS.md)
+- [问答 Prompt V6：分层继承与上下文投影](docs/FORTUNE_CHAT_PROMPT_V6.md)
+- [问答 Prompt V6：12 命造验证报告](docs/FORTUNE_CHAT_PROMPT_V6_VALIDATION.md)
 - [岁运交互确定性引擎 V3](docs/TEMPORAL_RELATION_ENGINE_V3.md)
 - [岁运确定性关系修复报告](docs/TEMPORAL_RELATION_FIX_REPORT.md)
 - [问真兼容神煞与关系规则 V1](docs/WENZHEN_COMPATIBILITY_RULES_V1.md)

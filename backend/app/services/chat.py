@@ -11,8 +11,15 @@ from ..adapters.llm import DeepSeekProvider
 from ..adapters.llm.deepseek import StructuredOutputProvider
 from ..logging_setup import append_llm_trace
 from ..persistence import connect
-from .agent.prompts import FORTUNE_CHAT_PROMPT_VERSION, FORTUNE_CHAT_SYSTEM_PROMPT
+from .agent.prompts import FORTUNE_CHAT_PROMPT_VERSION, build_fortune_chat_system_prompt
 from .chart_service import ChartService, get_default_service
+from .chat_context import (
+    build_model_context,
+    build_retrieval_queries,
+    compact_history,
+    detect_chat_topics,
+    is_redundant_deterministic_evidence,
+)
 from .rag import DatasetV2Retriever, EvidenceRetriever, RetrievalPlan, RetrievedEvidence
 
 ChatScope = Literal["general", "dayun", "lifecycle", "year", "month", "day"]
@@ -61,7 +68,6 @@ _CHAT_SCHEMA: dict[str, Any] = {
 def _serialize_evidence(item: RetrievedEvidence) -> dict[str, object]:
     return {
         "evidence_id": item.chunk_id,
-        "source_id": item.source_id,
         "title": item.title,
         "content": item.content,
         "citation": item.citation,
@@ -113,35 +119,43 @@ class FortuneChatService:
                 (item for item in temporal.dayuns if int(item.get("index", -1)) == target_dayun_index),
                 active_dayun,
             )
-        queries = tuple(
-            dict.fromkeys(
-                item
-                for item in (
-                    question.strip(),
-                    f"{chart.day_master}日主{scope}运势",
-                    f"{target_pillars['year']}流年{target_pillars['month']}流月",
-                    f"{target_pillars['day']}流日财运事业感情",
-                    f"大运{selected_dayun.get('ganzhi', '')}与原局作用",
-                    "六亲父母兄弟配偶子女 十神宫位 大运触发",
-                    "健康五行寒暖燥湿 调候脏腑 大运变化",
-                    "出生至起运 全部大运 生命周期比较",
-                    "旺相休囚死 格局喜用 大运流年流月流日层级",
-                    "岁运并临 伏吟 反吟 天克地冲 多层合冲刑害会 条件与救应",
-                )
-                if item.strip()
-            )
+        topics = detect_chat_topics(question)
+        basic = (
+            deterministic_details.get("basic", {})
+            if isinstance(deterministic_details, dict)
+            else {}
+        )
+        gender = str(basic.get("gender", "unspecified")) if isinstance(basic, dict) else "unspecified"
+        queries = build_retrieval_queries(
+            question=question,
+            day_master=chart.day_master,
+            gender=gender,
+            scope=scope,
+            topics=topics,
+            active_dayun_ganzhi=str(selected_dayun.get("ganzhi", "")),
+            year_ganzhi=target_pillars["year"],
+            month_ganzhi=target_pillars["month"],
+            day_ganzhi=target_pillars["day"],
         )
         evidence = self.retriever.retrieve(
             RetrievalPlan(
                 queries=queries,
                 school=school,
                 task_type="interpretation",
-                top_k=12,
-                case_top_k=3,
-                explanation_top_k=4,
+                top_k=8,
+                case_top_k=1,
+                explanation_top_k=2,
             )
         )
-        evidence_payload = [_serialize_evidence(item) for item in evidence]
+        prompt_evidence = tuple(
+            item
+            for item in evidence
+            if not is_redundant_deterministic_evidence(
+                source_id=item.source_id,
+                title=item.title,
+            )
+        )
+        evidence_payload = [_serialize_evidence(item) for item in prompt_evidence]
         natal_payload = {
             "day_master": chart.day_master,
             "pillars": [item.model_dump(mode="json") for item in chart.pillars],
@@ -163,46 +177,34 @@ class FortuneChatService:
             "target_pillars": target_pillars,
             "seasonal_strength": temporal.seasonal_strength,
         }
-        analysis_context = {
-            "context_version": "bazi-fortune-chat-context-v2",
-            "immutable": True,
-            "fact_authority": "deterministic_engine_only",
-            "natal": natal_payload,
-            "temporal": temporal_payload,
-            "model_boundary": {
-                "must_not_recalculate_chart_or_temporal_pillars": True,
-                "must_not_change_ten_gods_hidden_stems_nayin_or_shensha": True,
-                "must_follow_natal_dayun_year_month_day_hierarchy": True,
-                "must_analyze_kinship_with_star_palace_and_trigger": True,
-                "must_analyze_health_with_elements_climate_and_trigger": True,
-                "lifecycle_scope_must_cover_birth_qiyun_and_all_dayun": True,
-                "must_use_precomputed_temporal_relations": True,
-                "must_not_recalculate_fuyin_fanyin_tiankedichong_or_suiyun_binglin": True,
-            },
-        }
-        payload: dict[str, Any] = {
-            "chart_id": chart_id,
+        analysis_context = build_model_context(
+            chart,
+            temporal,
+            scope=scope,
+            topics=topics,
+            selected_dayun=selected_dayun,
+        )
+        query_payload: dict[str, object] = {
             "question": question,
             "scope": scope,
+            "topics": list(topics),
             "target_date": target_date.isoformat(),
-            "analysis_context": analysis_context,
-            "natal_chart": natal_payload,
-            "temporal_context": temporal_payload,
-            "retrieved_evidence": evidence_payload,
-            "conversation_history": list(history[-8:]),
-            "answer_policy": {
-                "give_conclusion_first": True,
-                "cover_opportunities_obstacles_timing_and_advice": True,
-                "allow_school_based_strength_pattern_and_useful_element_judgments": True,
-                "avoid_repetitive_audit_disclaimers": True,
-                "reflect_before_answer": True,
-                "cover_kinship_and_health_when_relevant": True,
-                "dayun_scope_uses_selected_dayun": True,
-                "lifecycle_scope_compares_all_dayun": True,
-            },
         }
+        if target_dayun_index is not None:
+            query_payload["target_dayun_index"] = target_dayun_index
+        payload: dict[str, Any] = {
+            "query": query_payload,
+            "analysis_context": analysis_context,
+            "output_profile": "fortune-chat-json-v2",
+        }
+        if evidence_payload:
+            payload["evidence"] = evidence_payload
+        compacted_history = compact_history(history)
+        if compacted_history:
+            payload["conversation_history"] = compacted_history
+        system_prompt = build_fortune_chat_system_prompt(scope=scope, topics=topics)
         response = self.provider_factory().complete_json(
-            system_prompt=FORTUNE_CHAT_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             input_payload=payload,
             schema=_CHAT_SCHEMA,
             prompt_version=FORTUNE_CHAT_PROMPT_VERSION,
@@ -227,7 +229,7 @@ class FortuneChatService:
             if isinstance(raw_sections, list)
             else []
         )
-        known_evidence = {item.chunk_id: item for item in evidence}
+        known_evidence = {item.chunk_id: item for item in prompt_evidence}
         raw_citations = response.payload.get("citations", [])
         citation_ids = [
             str(item)
@@ -245,12 +247,16 @@ class FortuneChatService:
         ]
         trace: dict[str, Any] = {
             "trace_type": "fortune_chat",
-            "system_prompt": FORTUNE_CHAT_SYSTEM_PROMPT,
+            "system_prompt": system_prompt,
             "prompt_version": response.prompt_version,
             "model_id": response.model_id,
             "input_payload": payload,
             "retrieval_queries": list(queries),
-            "retrieved_evidence": evidence_payload,
+            "retrieved_evidence": [_serialize_evidence(item) for item in evidence],
+            "deterministic_snapshot": {
+                "natal": natal_payload,
+                "temporal": temporal_payload,
+            },
             "model_output": response.payload,
             "provider_reasoning_content": response.reasoning_content,
             "provider_usage": response.usage,

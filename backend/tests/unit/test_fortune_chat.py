@@ -58,6 +58,16 @@ class _ChartService:
                 "branch": "午",
                 "fact_id": f"LIUNIAN-{target_year}",
                 "rule_id": "LIUNIAN-CALENDAR-V1",
+                "temporal_interactions": [
+                    {
+                        "fact_id": "TREL-CHAT",
+                        "type": "heaven_controls_earth_clashes",
+                        "label": "天克地冲",
+                        "participants": ["庚子", "甲午"],
+                        "temporal_positions": ["dayun", "liunian"],
+                        "rule_id": "PILLAR-TIANKEDICHONG-001",
+                    }
+                ],
             },
             interactions=[
                 {
@@ -109,9 +119,11 @@ class _Retriever:
 class _Provider:
     def __init__(self) -> None:
         self.input_payload: dict[str, Any] | None = None
+        self.system_prompt = ""
 
     def complete_json(self, **kwargs: Any) -> ProviderResponse:
         self.input_payload = kwargs["input_payload"]
+        self.system_prompt = kwargs["system_prompt"]
         return ProviderResponse(
             payload={
                 "answer": "今年事业宜主动争取，但财务安排应保留余量。",
@@ -157,14 +169,23 @@ def test_fortune_chat_builds_deterministic_temporal_context_and_filters_citation
         }
     ]
     assert retriever.plan is not None
-    assert any("流日财运事业感情" in query for query in retriever.plan.queries)
+    assert any("官杀 印星 食伤" in query for query in retriever.plan.queries)
+    assert not any("健康五行" in query for query in retriever.plan.queries)
+    assert not any("流日" in query for query in retriever.plan.queries)
     assert provider.input_payload is not None
-    assert provider.input_payload["natal_chart"]["deterministic_details"]["basic"][
-        "ren_yuan_commander"
-    ] == "癸水用事"
-    assert provider.input_payload["temporal_context"]["dayun"]["ganzhi"] == "辛卯"
-    assert provider.input_payload["temporal_context"]["temporal_interactions"][0]["type"] == "heaven_controls_earth_clashes"
-    assert provider.input_payload["analysis_context"]["model_boundary"]["must_use_precomputed_temporal_relations"] is True
+    context = provider.input_payload["analysis_context"]
+    assert context["context_policy"] == "deterministic_read_only"
+    assert context["natal_core"]["basic"]["ren_yuan_commander"] == "癸水用事"
+    hierarchy = context["temporal_hierarchy"]
+    assert hierarchy["active_dayun"]["ganzhi"] == "辛卯"
+    assert hierarchy["target_liunian"]["cross_layer_interactions"][0]["type"] == "heaven_controls_earth_clashes"
+    assert len(hierarchy["monthly_windows"]) == 12
+    assert "target_liuri" not in hierarchy
+    assert "natal_chart" not in provider.input_payload
+    assert "temporal_context" not in provider.input_payload
+    assert "answer_policy" not in provider.input_payload
     assert provider.input_payload["conversation_history"] == [
         {"role": "user", "content": "先看事业"}
     ]
+    assert "scope=year" in provider.system_prompt
+    assert "事业学业" in provider.system_prompt
