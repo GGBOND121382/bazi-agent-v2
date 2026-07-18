@@ -433,6 +433,7 @@ wait_for_url "gateway" "http://127.0.0.1:$PUBLIC_PORT/"
 wait_for_url "bazi frontend" "http://127.0.0.1:$PUBLIC_PORT/bazi/"
 wait_for_url "bazi API through gateway" "http://127.0.0.1:$PUBLIC_PORT/bazi/api/v1/health"
 wait_for_url "zhongyi frontend" "http://127.0.0.1:$PUBLIC_PORT/zhongyi/"
+wait_for_url "zhongyi portal route" "http://127.0.0.1:$PUBLIC_PORT/zhongyi/portal"
 
 if command -v ufw >/dev/null 2>&1 && run_root ufw status | grep -q '^Status: active'; then
   run_root ufw allow "$PUBLIC_PORT/tcp"
@@ -446,6 +447,7 @@ printf '  Bazi:     http://<server-ip>:%s/bazi/\n' "$PUBLIC_PORT"
 printf '  Zhongyi:  http://<server-ip>:%s/zhongyi/\n' "$PUBLIC_PORT"
 printf '\nService status:\n'
 printf '  sudo systemctl status %s %s nginx\n' "$BAZI_SERVICE" "$ZHONGYI_SERVICE"
+printf '  %s/manage-dual-services.sh {start|stop|restart|status|logs}\n' "$BAZI_DIR"
 if [[ -n "$GENERATED_ADMIN_PASSWORD" ]]; then
   printf '\nBazi initial administrator:\n'
   printf '  Username: admin\n'

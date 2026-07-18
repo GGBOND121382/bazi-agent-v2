@@ -82,10 +82,32 @@ ZHONGYI_DIR=/实际路径/zhongyi-diag ./deploy-dual-services.sh
 部署后的常用管理命令：
 
 ```bash
-sudo systemctl status bazi-agent-v2 zhongyi-diag nginx
-sudo journalctl -u bazi-agent-v2 -f
-sudo journalctl -u zhongyi-diag -f
+./manage-dual-services.sh status
+./manage-dual-services.sh stop
+./manage-dual-services.sh start
+./manage-dual-services.sh restart
+./manage-dual-services.sh logs
 ```
+
+日常启停不需要重复执行部署脚本；部署脚本只用于首次部署或配置发生变化时。上述管理脚本的 `stop` 会同时停止 Nginx 和两个应用，`start` 会将三者全部启动。
+
+只更新服务器上的中医项目（会执行 `git pull --ff-only`、重新安装依赖、重建 RAG 索引并重启中医服务）：
+
+```bash
+cd ~/bazi-agent-v2
+git pull --ff-only
+./manage-dual-services.sh update-zhongyi
+```
+
+同时更新两个项目并重新完成构建、Nginx 配置和健康检查：
+
+```bash
+cd ~/bazi-agent-v2
+git pull --ff-only
+./manage-dual-services.sh update-all
+```
+
+更新脚本检测到仓库内存在尚未提交的受跟踪文件时会停止，避免 `git pull` 覆盖服务器改动。`deepseek-apikey`、运行数据和本地配置均不参与 Git 更新。
 
 公网只需放行 TCP 8000。正式录入个人或医疗信息前，应配置域名和 HTTPS。
 
