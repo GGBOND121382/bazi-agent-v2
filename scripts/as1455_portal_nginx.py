@@ -1,21 +1,12 @@
 #!/usr/bin/env python3
-"""Locate and patch the live Nginx server that serves the shared portal.
-
-The resolver does not trust file names or static heuristics alone. It reads the
-configuration files reported by ``nginx -T`` and uses a temporary exact-match
-probe location to identify the server block that actually handles requests to
-127.0.0.1:<port>. Every probe edit is restored before the command returns.
-"""
+"""Locate and patch the loaded Nginx server that serves the shared portal."""
 from __future__ import annotations
 
 import argparse
+import os
 import re
-import secrets
 import subprocess
 import sys
-import time
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -37,6 +28,7 @@ class ServerBlock:
 class Candidate:
     path: Path
     block_index: int
+    score: int
 
 
 def mask_comments(text: str) -> str:
@@ -76,24 +68,42 @@ def listens_on_port(block: str, port: int) -> bool:
     )
 
 
-def portal_hint_score(block: str, web_root: str) -> int:
+def portal_score(block: str, web_root: str) -> int | None:
     root_match = re.search(r"(?m)^\s*root\s+([^;]+);", block)
     root = root_match.group(1).strip().strip("\"'").rstrip("/") if root_match else ""
     expected_root = web_root.rstrip("/")
-    score = 0
-    if root == expected_root:
-        score += 100
-    if re.search(r"location\s*=\s*/\s*\{", block) and re.search(
-        r"try_files\s+/index\.html", block
-    ):
-        score += 30
+    has_root = root == expected_root
+    has_portal = bool(
+        re.search(r"location\s*=\s*/\s*\{", block)
+        and re.search(r"try_files\s+/index\.html", block)
+    )
+    if not has_root and not has_portal:
+        return None
+    score = (100 if has_root else 0) + (30 if has_portal else 0)
     if re.search(r"(?m)^\s*listen\s+[^;]*\bdefault_server\b[^;]*;", block):
         score += 10
     return score
 
 
+def nginx_command(*args: str) -> list[str]:
+    command = [os.environ.get("NGINX_BIN", "nginx")]
+    prefix = os.environ.get("NGINX_PREFIX", "")
+    config = os.environ.get("NGINX_CONFIG", "")
+    if prefix:
+        command.extend(["-p", prefix])
+    if config:
+        command.extend(["-c", config])
+    command.extend(args)
+    return command
+
+
 def nginx_dump() -> str:
-    result = subprocess.run(["nginx", "-T"], check=False, capture_output=True, text=True)
+    result = subprocess.run(
+        nginx_command("-T"),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
     output = "\n".join(part for part in (result.stdout, result.stderr) if part)
     if result.returncode != 0:
         raise ValueError(output.strip() or f"nginx -T exited with {result.returncode}")
@@ -101,141 +111,55 @@ def nginx_dump() -> str:
 
 
 def loaded_config_paths(dump: str) -> list[Path]:
-    result: list[Path] = []
+    paths: list[Path] = []
     for marker in CONFIG_MARKER.finditer(dump):
         path = Path(marker.group(1)).resolve()
-        if path.is_file() and path not in result:
-            result.append(path)
-    if not result:
+        if path.is_file() and path not in paths:
+            paths.append(path)
+    if not paths:
         raise ValueError("nginx -T did not expose any loaded configuration files")
-    return result
+    return paths
 
 
-def candidate_blocks(paths: Iterable[Path], port: int, web_root: str) -> list[Candidate]:
-    ranked: list[tuple[int, Candidate]] = []
-    for path in paths:
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeError):
+def candidates_in_file(path: Path, port: int, web_root: str) -> list[Candidate]:
+    text = path.read_text(encoding="utf-8")
+    candidates: list[Candidate] = []
+    for block in iter_server_blocks(text):
+        if not listens_on_port(block.text, port):
             continue
-        for block in iter_server_blocks(text):
-            if listens_on_port(block.text, port):
-                ranked.append(
-                    (portal_hint_score(block.text, web_root), Candidate(path, block.index))
-                )
-    if not ranked:
-        raise ValueError(f"no loaded Nginx server listens on port {port}")
-    ranked.sort(key=lambda item: (-item[0], str(item[1].path), item[1].block_index))
-    return [candidate for _, candidate in ranked]
+        score = portal_score(block.text, web_root)
+        if score is not None:
+            candidates.append(Candidate(path, block.index, score))
+    return candidates
 
 
-def reload_nginx() -> None:
-    commands = (["systemctl", "reload", "nginx.service"], ["nginx", "-s", "reload"])
-    details: list[str] = []
-    for command in commands:
-        result = subprocess.run(command, check=False, capture_output=True, text=True)
-        if result.returncode == 0:
-            return
-        details.append((result.stderr or result.stdout or " ".join(command)).strip())
-    raise ValueError("could not reload Nginx: " + " | ".join(details))
+def choose_candidate(candidates: list[Candidate], preferred: Path | None = None) -> Candidate:
+    if not candidates:
+        raise ValueError("no loaded Nginx portal server block matched")
+    preferred_resolved = preferred.resolve() if preferred and preferred.exists() else None
+    ranked = [
+        (
+            candidate.score + (1 if preferred_resolved == candidate.path else 0),
+            candidate,
+        )
+        for candidate in candidates
+    ]
+    best_score = max(score for score, _ in ranked)
+    best = [candidate for score, candidate in ranked if score == best_score]
+    if len(best) != 1:
+        labels = ", ".join(f"{item.path}#server[{item.block_index}]" for item in best)
+        raise ValueError(f"multiple equally suitable loaded portal blocks: {labels}")
+    return best[0]
 
 
-def check_nginx() -> None:
-    result = subprocess.run(["nginx", "-t"], check=False, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise ValueError((result.stderr or result.stdout).strip() or "nginx -t failed")
-
-
-def request_probe(port: int, path: str, expected: str) -> bool:
-    url = f"http://127.0.0.1:{port}{path}"
-    request = urllib.request.Request(
-        url,
-        headers={"Host": "127.0.0.1", "Connection": "close"},
-    )
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    for _ in range(15):
+def resolve_candidate(port: int, web_root: str, preferred: Path | None) -> Candidate:
+    candidates: list[Candidate] = []
+    for path in loaded_config_paths(nginx_dump()):
         try:
-            with opener.open(request, timeout=1) as response:
-                if (
-                    response.status == 204
-                    and response.headers.get("X-AS1455-Probe") == expected
-                ):
-                    return True
-        except urllib.error.HTTPError as exc:
-            if exc.code == 204 and exc.headers.get("X-AS1455-Probe") == expected:
-                return True
-        except (urllib.error.URLError, TimeoutError):
-            pass
-        time.sleep(0.1)
-    return False
-
-
-def insert_into_block(text: str, block_index: int, payload: str) -> str:
-    blocks = list(iter_server_blocks(text))
-    if block_index < 0 or block_index >= len(blocks):
-        raise ValueError(f"server block index {block_index} is no longer valid")
-    target = blocks[block_index]
-    insert_at = target.end - 1
-    return text[:insert_at].rstrip() + "\n\n" + payload.rstrip() + "\n" + text[insert_at:]
-
-
-def probe_payload(token: str, candidate_id: str) -> tuple[str, str]:
-    path = f"/__as1455_probe_{token}"
-    payload = f"""    # BEGIN AS1455 PROBE {token}
-    location = {path} {{
-        add_header X-AS1455-Probe \"{candidate_id}\" always;
-        return 204;
-    }}
-    # END AS1455 PROBE {token}"""
-    return path, payload
-
-
-def discover_active_candidate(candidates: list[Candidate], port: int) -> Candidate:
-    originals: dict[Path, str] = {}
-    for candidate in candidates:
-        if candidate.path not in originals:
-            originals[candidate.path] = candidate.path.read_text(encoding="utf-8")
-
-    try:
-        for ordinal, candidate in enumerate(candidates):
-            token = secrets.token_hex(8)
-            candidate_id = f"{ordinal}-{token}"
-            probe_path, payload = probe_payload(token, candidate_id)
-            original = originals[candidate.path]
-            candidate.path.write_text(
-                insert_into_block(original, candidate.block_index, payload),
-                encoding="utf-8",
-            )
-            try:
-                try:
-                    check_nginx()
-                except ValueError:
-                    continue
-                reload_nginx()
-                if request_probe(port, probe_path, candidate_id):
-                    return candidate
-            finally:
-                candidate.path.write_text(original, encoding="utf-8")
-                check_nginx()
-                reload_nginx()
-    finally:
-        for path, original in originals.items():
-            if path.read_text(encoding="utf-8") != original:
-                path.write_text(original, encoding="utf-8")
-        check_nginx()
-        reload_nginx()
-
-    raise ValueError(
-        f"could not identify the live Nginx server for 127.0.0.1:{port}; "
-        "all loaded listening server blocks were probed and none handled the request"
-    )
-
-
-def resolve_file(port: int, web_root: str, preferred: Path | None) -> Path:
-    del preferred
-    paths = loaded_config_paths(nginx_dump())
-    candidates = candidate_blocks(paths, port, web_root)
-    return discover_active_candidate(candidates, port).path
+            candidates.extend(candidates_in_file(path, port, web_root))
+        except (OSError, UnicodeError, ValueError):
+            continue
+    return choose_candidate(candidates, preferred)
 
 
 def remove_old_dashboard_blocks(text: str) -> str:
@@ -249,8 +173,24 @@ def remove_old_dashboard_blocks(text: str) -> str:
     return text
 
 
+def insert_into_block(text: str, block_index: int, payload: str) -> str:
+    blocks = list(iter_server_blocks(text))
+    if block_index < 0 or block_index >= len(blocks):
+        raise ValueError(f"server block index {block_index} is no longer valid")
+    target = blocks[block_index]
+    insert_at = target.end - 1
+    return text[:insert_at].rstrip() + "\n\n" + payload.rstrip() + "\n" + text[insert_at:]
+
+
 def dashboard_payload(bazi_port: int, stock_port: int, base: str) -> str:
+    readiness = f"/_as1455_{base}_gateway_ready"
+    login_location = f"@as1455_{base}_login"
     return f"""    # BEGIN AS1455 DASHBOARD
+    location = {readiness} {{
+        add_header X-AS1455-Gateway \"{base}\" always;
+        return 204;
+    }}
+
     location = /_as1455_portal_auth {{
         internal;
         proxy_pass http://127.0.0.1:{bazi_port}/api/v1/auth/me;
@@ -261,13 +201,17 @@ def dashboard_payload(bazi_port: int, stock_port: int, base: str) -> str:
         proxy_set_header X-Original-URI $request_uri;
     }}
 
+    location {login_location} {{
+        return 302 /bazi/login?external_redirect=/{base}/;
+    }}
+
     location = /{base} {{
         return 301 /{base}/;
     }}
 
     location ^~ /{base}/ {{
         auth_request /_as1455_portal_auth;
-        error_page 401 403 =302 /bazi/login?external_redirect=/{base}/;
+        error_page 401 403 = {login_location};
 
         proxy_pass http://127.0.0.1:{stock_port};
         proxy_http_version 1.1;
@@ -303,18 +247,13 @@ def patch_file(
     if resolved not in loaded_paths:
         raise ValueError(f"refusing to patch an unloaded Nginx file: {resolved}")
 
-    candidates = [
-        candidate
-        for candidate in candidate_blocks([resolved], port, web_root)
-        if candidate.path == resolved
-    ]
-    active = discover_active_candidate(candidates, port)
-
     original = resolved.read_text(encoding="utf-8")
     cleaned = remove_old_dashboard_blocks(original)
+    candidates = candidates_in_file(resolved, port, web_root)
+    candidate = choose_candidate(candidates)
     updated = insert_into_block(
         cleaned,
-        active.block_index,
+        candidate.block_index,
         dashboard_payload(bazi_port, stock_port, base),
     )
     resolved.write_text(updated, encoding="utf-8")
@@ -344,7 +283,7 @@ def main() -> int:
     try:
         if args.command == "resolve":
             preferred = Path(args.preferred) if args.preferred else None
-            print(resolve_file(args.port, args.web_root, preferred))
+            print(resolve_candidate(args.port, args.web_root, preferred).path)
         else:
             patch_file(
                 args.file,
