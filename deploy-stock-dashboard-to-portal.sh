@@ -17,10 +17,9 @@ PORTAL_FILE="$WEB_ROOT/index.html"
 STOCK_ENV_FILE="${STOCK_ENV_FILE:-/etc/as1455-dashboard.env}"
 STOCK_UNIT_FILE="/etc/systemd/system/${STOCK_SERVICE}.service"
 STOCK_PYTHON="$STOCK_DIR/.venv_as1455/bin/python"
-NGINX_SITE_NAME="${NGINX_SITE_NAME:-dual-agents-8000}"
-NGINX_SITE_AVAILABLE="${NGINX_SITE_AVAILABLE:-/etc/nginx/sites-available/$NGINX_SITE_NAME}"
-NGINX_SITE_ENABLED="${NGINX_SITE_ENABLED:-/etc/nginx/sites-enabled/$NGINX_SITE_NAME}"
+NGINX_SITE_AVAILABLE="${NGINX_SITE_AVAILABLE:-/etc/nginx/sites-available/dual-agents-8000}"
 NGINX_ACTIVE_SITE="${NGINX_ACTIVE_SITE:-}"
+NGINX_HELPER="$BAZI_DIR/scripts/as1455_portal_nginx.py"
 
 NPM_BIN=""
 BACKUP_DIR=""
@@ -36,11 +35,7 @@ log() { printf '[stock-portal] %s\n' "$*"; }
 fail() { printf '[stock-portal] ERROR: %s\n' "$*" >&2; return 1; }
 
 run_root() {
-  if [[ "$EUID" -eq 0 ]]; then
-    "$@"
-  else
-    sudo "$@"
-  fi
+  if [[ "$EUID" -eq 0 ]]; then "$@"; else sudo "$@"; fi
 }
 
 run_as_app() {
@@ -61,50 +56,14 @@ validate_port() {
 
 validate_path() {
   local name="$1" value="$2"
-  [[ "$value" =~ ^/[A-Za-z0-9._/-]+$ ]] \
-    || fail "$name contains unsupported characters: $value"
+  [[ "$value" =~ ^/[A-Za-z0-9._/-]+$ ]] || fail "$name contains unsupported characters: $value"
 }
 
 check_branch() {
   local repo="$1" expected="$2" current
   [[ "${SKIP_BRANCH_CHECK:-0}" == "1" ]] && return 0
   current="$(git -C "$repo" branch --show-current)"
-  [[ "$current" == "$expected" ]] \
-    || fail "$repo is on branch '$current'; expected '$expected'"
-}
-
-resolve_active_nginx_site() {
-  if [[ -n "$NGINX_ACTIVE_SITE" ]]; then
-    validate_path NGINX_ACTIVE_SITE "$NGINX_ACTIVE_SITE"
-    [[ -f "$NGINX_ACTIVE_SITE" ]] || fail "active Nginx site is missing: $NGINX_ACTIVE_SITE"
-    return 0
-  fi
-
-  if [[ -L "$NGINX_SITE_ENABLED" ]]; then
-    NGINX_ACTIVE_SITE="$(readlink -f "$NGINX_SITE_ENABLED")"
-  elif [[ -f "$NGINX_SITE_ENABLED" ]]; then
-    NGINX_ACTIVE_SITE="$NGINX_SITE_ENABLED"
-  else
-    fail "enabled Nginx site is missing: $NGINX_SITE_ENABLED"
-  fi
-
-  [[ -n "$NGINX_ACTIVE_SITE" && -f "$NGINX_ACTIVE_SITE" ]] \
-    || fail "could not resolve the active Nginx site from $NGINX_SITE_ENABLED"
-  validate_path NGINX_ACTIVE_SITE "$NGINX_ACTIVE_SITE"
-  log "active Nginx site: $NGINX_ACTIVE_SITE"
-  if [[ -f "$NGINX_SITE_AVAILABLE" && "$NGINX_ACTIVE_SITE" != "$NGINX_SITE_AVAILABLE" ]]; then
-    log "notice: enabled site does not target $NGINX_SITE_AVAILABLE; patching the active file"
-  fi
-}
-
-resolve_npm() {
-  if command -v npm >/dev/null 2>&1; then
-    NPM_BIN="$(command -v npm)"
-  elif [[ -x /usr/local/bin/npm ]]; then
-    NPM_BIN=/usr/local/bin/npm
-  else
-    fail "npm is missing; run deploy-dual-services.sh once or install Node.js 18+"
-  fi
+  [[ "$current" == "$expected" ]] || fail "$repo is on branch '$current'; expected '$expected'"
 }
 
 http_status() {
@@ -124,63 +83,70 @@ wait_for_status() {
   fail "$name did not reach expected HTTP status ($expected); last=$status url=$url"
 }
 
-cleanup() {
-  if [[ -n "$BACKUP_DIR" && -d "$BACKUP_DIR" ]]; then
-    run_root rm -rf -- "$BACKUP_DIR" || true
+resolve_npm() {
+  if command -v npm >/dev/null 2>&1; then
+    NPM_BIN="$(command -v npm)"
+  elif [[ -x /usr/local/bin/npm ]]; then
+    NPM_BIN=/usr/local/bin/npm
+  else
+    fail "npm is missing; run deploy-dual-services.sh once or install Node.js 18+"
   fi
+}
+
+resolve_nginx_site() {
+  if [[ -n "$NGINX_ACTIVE_SITE" ]]; then
+    validate_path NGINX_ACTIVE_SITE "$NGINX_ACTIVE_SITE"
+    [[ -f "$NGINX_ACTIVE_SITE" ]] || fail "Nginx file is missing: $NGINX_ACTIVE_SITE"
+  else
+    NGINX_ACTIVE_SITE="$(
+      run_root python3 "$NGINX_HELPER" resolve \
+        --port "$PUBLIC_PORT" \
+        --web-root "$WEB_ROOT" \
+        --preferred "$NGINX_SITE_AVAILABLE"
+    )"
+  fi
+  [[ -f "$NGINX_ACTIVE_SITE" ]] || fail "could not resolve active Nginx portal file"
+  validate_path NGINX_ACTIVE_SITE "$NGINX_ACTIVE_SITE"
+  log "active Nginx portal file: $NGINX_ACTIVE_SITE"
+}
+
+cleanup() {
+  [[ -z "$BACKUP_DIR" || ! -d "$BACKUP_DIR" ]] || run_root rm -rf -- "$BACKUP_DIR" || true
 }
 
 rollback() {
   local code="$1"
   trap - ERR
   set +e
-  if [[ "$ROLLBACK_READY" != "1" ]]; then
-    exit "$code"
-  fi
-
+  if [[ "$ROLLBACK_READY" != "1" ]]; then exit "$code"; fi
   log "deployment failed; restoring the previous portal deployment"
-  [[ ! -f "$BACKUP_DIR/portal.html" ]] \
-    || run_root cp -a "$BACKUP_DIR/portal.html" "$PORTAL_FILE"
-  [[ ! -f "$BACKUP_DIR/nginx-active.conf" ]] \
-    || run_root cp -a "$BACKUP_DIR/nginx-active.conf" "$NGINX_ACTIVE_SITE"
-
-  if [[ "$BAZI_WEB_EXISTED" == "1" && -d "$BACKUP_DIR/bazi-web" ]]; then
-    run_root find "$WEB_ROOT/bazi" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + \
-      2>/dev/null || true
+  [[ ! -f "$BACKUP_DIR/portal.html" ]] || run_root cp -a "$BACKUP_DIR/portal.html" "$PORTAL_FILE"
+  [[ ! -f "$BACKUP_DIR/nginx.conf" ]] || run_root cp -a "$BACKUP_DIR/nginx.conf" "$NGINX_ACTIVE_SITE"
+  if [[ "$BAZI_WEB_EXISTED" == "1" ]]; then
+    run_root find "$WEB_ROOT/bazi" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
     run_root cp -a "$BACKUP_DIR/bazi-web/." "$WEB_ROOT/bazi/"
-  elif [[ "$BAZI_WEB_EXISTED" == "0" ]]; then
-    run_root rm -rf -- "$WEB_ROOT/bazi"
   fi
-
-  if [[ "$UNIT_EXISTED" == "1" && -f "$BACKUP_DIR/service.unit" ]]; then
+  if [[ "$UNIT_EXISTED" == "1" ]]; then
     run_root cp -a "$BACKUP_DIR/service.unit" "$STOCK_UNIT_FILE"
   else
     run_root systemctl disable --now "$STOCK_SERVICE.service" >/dev/null 2>&1 || true
     run_root rm -f -- "$STOCK_UNIT_FILE"
   fi
-
-  if [[ "$ENV_EXISTED" == "1" && -f "$BACKUP_DIR/service.env" ]]; then
+  if [[ "$ENV_EXISTED" == "1" ]]; then
     run_root cp -a "$BACKUP_DIR/service.env" "$STOCK_ENV_FILE"
   else
     run_root rm -f -- "$STOCK_ENV_FILE"
   fi
-
   run_root systemctl daemon-reload >/dev/null 2>&1 || true
   if [[ "$UNIT_EXISTED" == "1" ]]; then
-    if [[ "$SERVICE_WAS_ENABLED" == "1" ]]; then
-      run_root systemctl enable "$STOCK_SERVICE.service" >/dev/null 2>&1 || true
-    else
-      run_root systemctl disable "$STOCK_SERVICE.service" >/dev/null 2>&1 || true
-    fi
-    if [[ "$SERVICE_WAS_ACTIVE" == "1" ]]; then
-      run_root systemctl restart "$STOCK_SERVICE.service" >/dev/null 2>&1 || true
-    else
-      run_root systemctl stop "$STOCK_SERVICE.service" >/dev/null 2>&1 || true
-    fi
+    [[ "$SERVICE_WAS_ENABLED" == "1" ]] \
+      && run_root systemctl enable "$STOCK_SERVICE.service" >/dev/null 2>&1 \
+      || run_root systemctl disable "$STOCK_SERVICE.service" >/dev/null 2>&1 || true
+    [[ "$SERVICE_WAS_ACTIVE" == "1" ]] \
+      && run_root systemctl restart "$STOCK_SERVICE.service" >/dev/null 2>&1 \
+      || run_root systemctl stop "$STOCK_SERVICE.service" >/dev/null 2>&1 || true
   fi
-
-  run_root nginx -t >/dev/null 2>&1 \
-    && run_root systemctl reload nginx.service >/dev/null 2>&1 || true
+  run_root nginx -t >/dev/null 2>&1 && run_root systemctl reload nginx.service >/dev/null 2>&1 || true
   exit "$code"
 }
 
@@ -193,16 +159,12 @@ install_dashboard_dependency() {
 }
 
 build_bazi_frontend() {
-  if [[ "${SKIP_BAZI_FRONTEND_BUILD:-0}" == "1" ]]; then
-    log "skipping bazi frontend build"
-    return 0
-  fi
+  [[ "${SKIP_BAZI_FRONTEND_BUILD:-0}" == "1" ]] && { log "skipping bazi frontend build"; return 0; }
   resolve_npm
   log "rebuilding bazi frontend for external post-login redirect support"
   run_as_app env npm_config_audit=false npm_config_fund=false \
     "$NPM_BIN" --prefix "$BAZI_DIR/frontend" ci
-  run_as_app env VITE_BASE_PATH=/bazi/ \
-    "$NPM_BIN" --prefix "$BAZI_DIR/frontend" run build
+  run_as_app env VITE_BASE_PATH=/bazi/ "$NPM_BIN" --prefix "$BAZI_DIR/frontend" run build
   run_root install -d -o root -g root -m 755 "$WEB_ROOT/bazi"
   run_root find "$WEB_ROOT/bazi" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
   run_root cp -a "$BAZI_DIR/frontend/dist/." "$WEB_ROOT/bazi/"
@@ -219,8 +181,7 @@ install_dashboard_environment() {
     token="$(openssl rand -hex 24)"
     GENERATED_REFRESH_TOKEN="$token"
   fi
-  [[ "$token" =~ ^[A-Za-z0-9._-]+$ ]] \
-    || fail "refresh token may contain only letters, numbers, dot, underscore and hyphen"
+  [[ "$token" =~ ^[A-Za-z0-9._-]+$ ]] || fail "refresh token contains unsupported characters"
   temporary="$(mktemp)"
   chmod 600 "$temporary"
   printf 'AS1455_DASHBOARD_REFRESH_TOKEN=%s\n' "$token" > "$temporary"
@@ -273,19 +234,14 @@ patch_portal() {
   run_root env PORTAL_FILE="$PORTAL_FILE" STOCK_BASE_PATH="$STOCK_BASE_PATH" python3 - <<'PY'
 import os
 from pathlib import Path
-
 path = Path(os.environ["PORTAL_FILE"])
 html = path.read_text(encoding="utf-8")
 base = os.environ["STOCK_BASE_PATH"].strip("/")
-card = (
-    f'<a class="card" href="/{base}/"><strong>AS1455 策略看板</strong>'
-    '<span>九模型历史回测、严格 OOS 与持仓分析</span></a>'
-)
+card = f'<a class="card" href="/{base}/"><strong>AS1455 策略看板</strong><span>九模型历史回测、严格 OOS 与持仓分析</span></a>'
 if f'href="/{base}/"' not in html:
-    marker = "</section>"
-    if marker not in html:
+    if "</section>" not in html:
         raise SystemExit("portal does not contain </section>")
-    html = html.replace(marker, card + marker, 1)
+    html = html.replace("</section>", card + "</section>", 1)
 html = html.replace("width:min(760px,92vw)", "width:min(1080px,92vw)")
 path.write_text(html, encoding="utf-8")
 PY
@@ -294,101 +250,21 @@ PY
 
 patch_nginx() {
   log "adding authenticated /$STOCK_BASE_PATH/ proxy to $NGINX_ACTIVE_SITE"
-  run_root env NGINX_SITE="$NGINX_ACTIVE_SITE" PUBLIC_PORT="$PUBLIC_PORT" \
-    BAZI_API_PORT="$BAZI_API_PORT" STOCK_PORT="$STOCK_PORT" \
-    STOCK_BASE_PATH="$STOCK_BASE_PATH" python3 - <<'PY'
-import os
-import re
-from pathlib import Path
-
-path = Path(os.environ["NGINX_SITE"])
-text = path.read_text(encoding="utf-8")
-public_port = int(os.environ["PUBLIC_PORT"])
-base = os.environ["STOCK_BASE_PATH"].strip("/")
-bazi_port = int(os.environ["BAZI_API_PORT"])
-stock_port = int(os.environ["STOCK_PORT"])
-begin = "    # BEGIN AS1455 DASHBOARD"
-end = "    # END AS1455 DASHBOARD"
-auth_uri = "_as1455_portal_auth"
-login_location = "@as1455_stock_login"
-block = f"""    # BEGIN AS1455 DASHBOARD
-    location = /{auth_uri} {{
-        internal;
-        proxy_pass http://127.0.0.1:{bazi_port}/api/v1/auth/me;
-        proxy_pass_request_body off;
-        proxy_set_header Content-Length "";
-        proxy_set_header Cookie $http_cookie;
-        proxy_set_header Host $host;
-        proxy_set_header X-Original-URI $request_uri;
-    }}
-
-    location {login_location} {{
-        return 302 /bazi/login?external_redirect=/{base}/;
-    }}
-
-    location = /{base} {{
-        return 301 /{base}/;
-    }}
-
-    location ^~ /{base}/ {{
-        auth_request /{auth_uri};
-        error_page 401 403 = {login_location};
-
-        proxy_pass http://127.0.0.1:{stock_port};
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Prefix /{base};
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_read_timeout 86400s;
-        proxy_send_timeout 86400s;
-    }}
-    # END AS1455 DASHBOARD"""
-
-if begin in text:
-    start = text.index(begin)
-    finish = text.index(end, start) + len(end)
-    text = text[:start] + block + text[finish:]
-else:
-    listen_pattern = re.compile(rf"\blisten\s+(?:\[[^]]+\]:)?{public_port}\b")
-    listen_match = listen_pattern.search(text)
-    if not listen_match:
-        raise SystemExit(f"active Nginx file has no server listening on {public_port}")
-    server_start = text.rfind("server", 0, listen_match.start())
-    brace_start = text.find("{", server_start, listen_match.start())
-    if server_start < 0 or brace_start < 0:
-        raise SystemExit("could not locate the target server block")
-    depth = 0
-    server_end = None
-    for index in range(brace_start, len(text)):
-        char = text[index]
-        if char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                server_end = index
-                break
-    if server_end is None:
-        raise SystemExit("target server block has unbalanced braces")
-    text = text[:server_end] + "\n\n" + block + "\n" + text[server_end:]
-
-path.write_text(text, encoding="utf-8")
-PY
+  run_root python3 "$NGINX_HELPER" patch \
+    --file "$NGINX_ACTIVE_SITE" \
+    --port "$PUBLIC_PORT" \
+    --web-root "$WEB_ROOT" \
+    --bazi-port "$BAZI_API_PORT" \
+    --stock-port "$STOCK_PORT" \
+    --base "$STOCK_BASE_PATH"
 }
 
 validate_auth_backend() {
   local url="http://127.0.0.1:$BAZI_API_PORT/api/v1/auth/me" status
   status="$(http_status "$url" || true)"
-  case "$status" in
-    200|401) log "bazi auth endpoint responded with HTTP $status: $url" ;;
-    *) fail "bazi auth endpoint returned HTTP $status: $url" ;;
-  esac
+  [[ "$status" == "200" || "$status" == "401" ]] \
+    || fail "bazi auth endpoint returned HTTP $status: $url"
+  log "bazi auth endpoint responded with HTTP $status: $url"
 }
 
 validate_gateway_route() {
@@ -396,20 +272,15 @@ validate_gateway_route() {
   headers="$(curl --silent --show-error --dump-header - --output /dev/null --max-time 10 "$url")"
   status="$(printf '%s\n' "$headers" | awk 'toupper($1) ~ /^HTTP\// {code=$2} END {print code}')"
   location="$(printf '%s\n' "$headers" | awk 'BEGIN{IGNORECASE=1} /^Location:/ {sub(/\r$/,""); sub(/^[^:]*:[[:space:]]*/,""); print; exit}')"
-  case "$status" in
-    200)
-      log "gateway route is directly accessible: $url"
-      ;;
-    302)
-      [[ "$location" == "/bazi/login?external_redirect=/$STOCK_BASE_PATH/" ]] \
-        || fail "gateway redirect target is unexpected: ${location:-<missing>}"
-      log "gateway route correctly redirects unauthenticated users: $location"
-      ;;
-    *)
-      printf '%s\n' "$headers" >&2
-      fail "gateway route returned HTTP ${status:-unknown}: $url"
-      ;;
-  esac
+  if [[ "$status" == "200" ]]; then
+    log "gateway route is directly accessible: $url"
+  elif [[ "$status" == "302" && "$location" == "/bazi/login?external_redirect=/$STOCK_BASE_PATH/" ]]; then
+    log "gateway route correctly redirects unauthenticated users: $location"
+  else
+    printf '%s\n' "$headers" >&2
+    run_root nginx -T 2>&1 | grep -n -A45 -B8 "BEGIN AS1455 DASHBOARD" >&2 || true
+    fail "gateway route returned HTTP ${status:-unknown}: $url"
+  fi
 }
 
 validate_port PUBLIC_PORT "$PUBLIC_PORT"
@@ -419,59 +290,44 @@ validate_port STOCK_PORT "$STOCK_PORT"
 [[ "$PUBLIC_PORT" != "$BAZI_API_PORT" && "$PUBLIC_PORT" != "$ZHONGYI_PORT" \
    && "$PUBLIC_PORT" != "$STOCK_PORT" && "$BAZI_API_PORT" != "$ZHONGYI_PORT" \
    && "$BAZI_API_PORT" != "$STOCK_PORT" && "$ZHONGYI_PORT" != "$STOCK_PORT" ]] \
-  || fail "PUBLIC_PORT, BAZI_API_PORT, ZHONGYI_PORT and STOCK_PORT must differ"
+  || fail "all four ports must differ"
 [[ "$STOCK_BASE_PATH" =~ ^[A-Za-z0-9._-]+$ ]] || fail "invalid STOCK_BASE_PATH"
 [[ "$STOCK_SERVICE" =~ ^[A-Za-z0-9_.-]+$ ]] || fail "invalid STOCK_SERVICE"
 [[ -n "$APP_HOME" ]] || fail "could not resolve home directory for $APP_USER"
-validate_path BAZI_DIR "$BAZI_DIR"
-validate_path STOCK_DIR "$STOCK_DIR"
-validate_path MATRIX_ROOT "$MATRIX_ROOT"
-validate_path WEB_ROOT "$WEB_ROOT"
-validate_path STOCK_ENV_FILE "$STOCK_ENV_FILE"
-validate_path NGINX_SITE_AVAILABLE "$NGINX_SITE_AVAILABLE"
-validate_path NGINX_SITE_ENABLED "$NGINX_SITE_ENABLED"
-
+for item in BAZI_DIR STOCK_DIR MATRIX_ROOT WEB_ROOT STOCK_ENV_FILE NGINX_SITE_AVAILABLE; do
+  validate_path "$item" "${!item}"
+done
 id "$APP_USER" >/dev/null 2>&1 || fail "application user does not exist: $APP_USER"
-[[ "$EUID" -ne 0 || "$(id -un)" == "$APP_USER" ]] \
-  || command -v runuser >/dev/null 2>&1 || fail "runuser is required"
+[[ "$EUID" -ne 0 || "$(id -un)" == "$APP_USER" ]] || command -v runuser >/dev/null 2>&1 || fail "runuser is required"
 command -v sudo >/dev/null 2>&1 || [[ "$EUID" -eq 0 ]] || fail "sudo is required"
 for command_name in systemctl nginx curl python3 openssl git; do
   command -v "$command_name" >/dev/null 2>&1 || fail "$command_name is required"
 done
-
-[[ -f "$BAZI_DIR/frontend/package-lock.json" ]] \
-  || fail "bazi frontend not found at $BAZI_DIR/frontend"
+[[ -f "$NGINX_HELPER" ]] || fail "Nginx helper is missing: $NGINX_HELPER"
+[[ -f "$BAZI_DIR/frontend/package-lock.json" ]] || fail "bazi frontend is missing"
 [[ -f "$BAZI_DIR/frontend/src/pages/LoginPage.vue" ]] || fail "bazi LoginPage.vue is missing"
 [[ -x "$STOCK_PYTHON" ]] || fail "stock virtual environment is missing: $STOCK_PYTHON"
 [[ -f "$STOCK_DIR/requirements-dashboard.txt" ]] || fail "requirements-dashboard.txt is missing"
-[[ -f "$STOCK_DIR/scripts/run_as1455_backtest_dashboard.sh" ]] \
-  || fail "dashboard launcher is missing"
+[[ -f "$STOCK_DIR/scripts/run_as1455_backtest_dashboard.sh" ]] || fail "dashboard launcher is missing"
 [[ -f "$PORTAL_FILE" ]] || fail "portal is not deployed: $PORTAL_FILE"
-grep -q 'external_redirect' "$BAZI_DIR/frontend/src/pages/LoginPage.vue" \
-  || fail "bazi branch is missing external login redirect support; pull the latest branch"
-grep -q 'server.baseUrlPath' "$STOCK_DIR/scripts/run_as1455_backtest_dashboard.sh" \
-  || fail "stock branch is missing Streamlit baseUrlPath support; pull the latest branch"
+grep -q 'external_redirect' "$BAZI_DIR/frontend/src/pages/LoginPage.vue" || fail "bazi branch lacks external redirect support"
+grep -q 'server.baseUrlPath' "$STOCK_DIR/scripts/run_as1455_backtest_dashboard.sh" || fail "stock branch lacks baseUrlPath support"
 check_branch "$BAZI_DIR" "${EXPECTED_BAZI_BRANCH:-agent/mobile-ui-deterministic-chat}"
 check_branch "$STOCK_DIR" "${EXPECTED_STOCK_BRANCH:-agent/ch17-as1455-clean}"
-resolve_active_nginx_site
+resolve_nginx_site
 validate_auth_backend
-
 install_dashboard_dependency
 
 BACKUP_DIR="$(mktemp -d)"
 run_root cp -a "$PORTAL_FILE" "$BACKUP_DIR/portal.html"
-run_root cp -a "$NGINX_ACTIVE_SITE" "$BACKUP_DIR/nginx-active.conf"
+run_root cp -a "$NGINX_ACTIVE_SITE" "$BACKUP_DIR/nginx.conf"
 if [[ -d "$WEB_ROOT/bazi" ]]; then
   BAZI_WEB_EXISTED=1
   run_root mkdir -p "$BACKUP_DIR/bazi-web"
   run_root cp -a "$WEB_ROOT/bazi/." "$BACKUP_DIR/bazi-web/"
 fi
-if run_root systemctl is-active --quiet "$STOCK_SERVICE.service"; then
-  SERVICE_WAS_ACTIVE=1
-fi
-if run_root systemctl is-enabled --quiet "$STOCK_SERVICE.service"; then
-  SERVICE_WAS_ENABLED=1
-fi
+if run_root systemctl is-active --quiet "$STOCK_SERVICE.service"; then SERVICE_WAS_ACTIVE=1; fi
+if run_root systemctl is-enabled --quiet "$STOCK_SERVICE.service"; then SERVICE_WAS_ENABLED=1; fi
 if [[ -f "$STOCK_UNIT_FILE" ]]; then
   UNIT_EXISTED=1
   run_root cp -a "$STOCK_UNIT_FILE" "$BACKUP_DIR/service.unit"
@@ -493,18 +349,13 @@ run_root systemctl reload nginx.service
 wait_for_status "portal" "http://127.0.0.1:$PUBLIC_PORT/" '^200$'
 wait_for_status "bazi login page" "http://127.0.0.1:$PUBLIC_PORT/bazi/login" '^200$'
 validate_gateway_route
-grep -q "href=\"/$STOCK_BASE_PATH/\"" "$PORTAL_FILE" \
-  || fail "portal card validation failed"
+grep -q "href=\"/$STOCK_BASE_PATH/\"" "$PORTAL_FILE" || fail "portal card validation failed"
 
 trap - ERR
 log "AS1455 dashboard portal integration succeeded"
-printf '\nAccess URL:\n'
-printf '  http://<server-ip>:%s/%s/\n' "$PUBLIC_PORT" "$STOCK_BASE_PATH"
-printf '\nService status:\n'
-printf '  sudo systemctl status %s nginx\n' "$STOCK_SERVICE"
-printf '  sudo journalctl -u %s -f\n' "$STOCK_SERVICE"
+printf '\nAccess URL:\n  http://<server-ip>:%s/%s/\n' "$PUBLIC_PORT" "$STOCK_BASE_PATH"
+printf '\nService status:\n  sudo systemctl status %s nginx\n' "$STOCK_SERVICE"
 if [[ -n "$GENERATED_REFRESH_TOKEN" ]]; then
-  printf '\nGenerated dashboard refresh token:\n'
-  printf '  %s\n' "$GENERATED_REFRESH_TOKEN"
-  printf '  Save it now; it is stored root-only in %s.\n' "$STOCK_ENV_FILE"
+  printf '\nGenerated dashboard refresh token:\n  %s\n' "$GENERATED_REFRESH_TOKEN"
+  printf 'Save it now; it is stored root-only in %s.\n' "$STOCK_ENV_FILE"
 fi
