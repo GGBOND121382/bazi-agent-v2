@@ -11,12 +11,29 @@ const password = ref('')
 const error = ref('')
 const loading = ref(false)
 
+function safeExternalRedirect(value: unknown): string {
+  if (
+    typeof value !== 'string' ||
+    !value.startsWith('/') ||
+    value.startsWith('//') ||
+    value.includes('\\')
+  ) {
+    return ''
+  }
+  return value
+}
+
 async function submit() {
   loading.value = true
   error.value = ''
   try {
     const user = await client.login(username.value, password.value)
     sessionStorage.setItem('bazi:current-user', JSON.stringify(user))
+    const externalRedirect = safeExternalRedirect(route.query.external_redirect)
+    if (externalRedirect) {
+      window.location.assign(externalRedirect)
+      return
+    }
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
     await router.replace(redirect)
   } catch (cause) {
