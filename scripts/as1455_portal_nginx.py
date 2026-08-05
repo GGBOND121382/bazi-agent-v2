@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Locate and patch the Nginx server that serves the shared portal."""
+"""Locate and patch the active Nginx server that serves the shared portal."""
 from __future__ import annotations
 
 import argparse
-import glob
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 BEGIN = "    # BEGIN AS1455 DASHBOARD"
 END = "    # END AS1455 DASHBOARD"
+CONFIG_MARKER = re.compile(r"(?m)^# configuration file (/.+?):\s*$")
 
 
 @dataclass(frozen=True)
@@ -47,13 +48,19 @@ def block_score(block: str, port: int, web_root: str) -> int | None:
     )
     if not listen:
         return None
+
     root_match = re.search(r"(?m)^\s*root\s+([^;]+);", block)
     root = root_match.group(1).strip().strip("\"'").rstrip("/") if root_match else ""
-    has_root = root == web_root.rstrip("/")
+    expected_root = web_root.rstrip("/")
+    has_root = root == expected_root
     has_portal = bool(
         re.search(r"location\s*=\s*/\s*\{", block)
         and re.search(r"try_files\s+/index\.html", block)
     )
+
+    if not has_root and not has_portal:
+        return None
+
     score = (100 if has_root else 0) + (30 if has_portal else 0)
     if "default_server" in listen.group(0):
         score += 10
@@ -65,10 +72,12 @@ def best_block(text: str, port: int, web_root: str) -> ServerBlock:
     for start, end in iter_server_ranges(text):
         block = text[start:end]
         score = block_score(block, port, web_root)
-        if score is not None and score > 0:
+        if score is not None:
             matches.append(ServerBlock(start, end, block, score))
+
     if not matches:
         raise ValueError(f"no server listens on {port} and serves {web_root}")
+
     best_score = max(item.score for item in matches)
     best = [item for item in matches if item.score == best_score]
     if len(best) != 1:
@@ -76,40 +85,60 @@ def best_block(text: str, port: int, web_root: str) -> ServerBlock:
     return best[0]
 
 
-def candidate_files(preferred: Path | None) -> list[Path]:
-    result: list[Path] = []
-    for pattern in ("/etc/nginx/sites-enabled/*", "/etc/nginx/conf.d/*.conf"):
-        for value in glob.glob(pattern):
-            path = Path(value).resolve()
-            if path.is_file() and path not in result:
-                result.append(path)
-    if preferred and preferred.is_file():
-        path = preferred.resolve()
-        if path not in result:
-            result.append(path)
-    return result
+def nginx_dump() -> str:
+    result = subprocess.run(
+        ["nginx", "-T"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+    if result.returncode != 0:
+        detail = output.strip() or f"nginx -T exited with {result.returncode}"
+        raise ValueError(detail)
+    return output
+
+
+def loaded_config_sections(dump: str) -> list[tuple[Path, str]]:
+    markers = list(CONFIG_MARKER.finditer(dump))
+    sections: list[tuple[Path, str]] = []
+    for index, marker in enumerate(markers):
+        start = marker.end()
+        end = markers[index + 1].start() if index + 1 < len(markers) else len(dump)
+        path = Path(marker.group(1)).resolve()
+        if path.is_file():
+            sections.append((path, dump[start:end]))
+    if not sections:
+        raise ValueError("nginx -T did not expose any loaded configuration files")
+    return sections
 
 
 def resolve_file(port: int, web_root: str, preferred: Path | None) -> Path:
     matches: list[tuple[int, Path]] = []
-    candidates = candidate_files(preferred)
-    for path in candidates:
+    preferred_resolved = preferred.resolve() if preferred and preferred.exists() else None
+
+    for path, rendered_text in loaded_config_sections(nginx_dump()):
         try:
-            text = path.read_text(encoding="utf-8")
-            block = best_block(text, port, web_root)
+            rendered_block = best_block(rendered_text, port, web_root)
+            source_text = path.read_text(encoding="utf-8")
+            source_block = best_block(source_text, port, web_root)
         except (OSError, UnicodeError, ValueError):
             continue
-        matches.append((block.score, path))
+        score = min(rendered_block.score, source_block.score)
+        if preferred_resolved is not None and path == preferred_resolved:
+            score += 1
+        matches.append((score, path))
+
     if not matches:
-        searched = ", ".join(str(path) for path in candidates) or "<none>"
         raise ValueError(
-            f"cannot find an enabled portal server for port={port}, root={web_root}; "
-            f"searched: {searched}"
+            f"cannot find a loaded Nginx server for port={port}, root={web_root}; "
+            "the preferred sites-available file is ignored unless nginx -T proves it is loaded"
         )
-    score = max(item[0] for item in matches)
-    paths = sorted({path for item_score, path in matches if item_score == score})
+
+    best_score = max(score for score, _ in matches)
+    paths = sorted({path for score, path in matches if score == best_score})
     if len(paths) != 1:
-        raise ValueError("multiple portal config files match: " + ", ".join(map(str, paths)))
+        raise ValueError("multiple loaded portal config files match: " + ", ".join(map(str, paths)))
     return paths[0]
 
 
@@ -132,6 +161,10 @@ def patch_file(
     stock_port: int,
     base: str,
 ) -> None:
+    base = base.strip("/")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", base):
+        raise ValueError(f"invalid base path: {base!r}")
+
     text = remove_old_blocks(path.read_text(encoding="utf-8"))
     target = best_block(text, port, web_root)
     block = f"""    # BEGIN AS1455 DASHBOARD
@@ -168,18 +201,21 @@ def patch_file(
         proxy_send_timeout 86400s;
     }}
     # END AS1455 DASHBOARD"""
+
     insert_at = target.end - 1
-    updated = text[:insert_at] + "\n\n" + block + "\n" + text[insert_at:]
+    updated = text[:insert_at].rstrip() + "\n\n" + block + "\n" + text[insert_at:]
     path.write_text(updated, encoding="utf-8")
 
 
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser()
     sub = root.add_subparsers(dest="command", required=True)
+
     resolve = sub.add_parser("resolve")
     resolve.add_argument("--port", type=int, required=True)
     resolve.add_argument("--web-root", required=True)
     resolve.add_argument("--preferred")
+
     patch = sub.add_parser("patch")
     patch.add_argument("--file", type=Path, required=True)
     patch.add_argument("--port", type=int, required=True)
