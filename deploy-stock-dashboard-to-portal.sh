@@ -18,19 +18,26 @@ PORTAL_FILE="$WEB_ROOT/index.html"
 STOCK_ENV_FILE="${STOCK_ENV_FILE:-/etc/as1455-dashboard.env}"
 STOCK_UNIT_FILE="/etc/systemd/system/${STOCK_SERVICE}.service"
 STOCK_PYTHON="$STOCK_DIR/.venv_as1455/bin/python"
+
 NPM_BIN=""
 BACKUP_DIR=""
+ROLLBACK_READY=0
 UNIT_EXISTED=0
 ENV_EXISTED=0
 BAZI_WEB_EXISTED=0
 SERVICE_WAS_ACTIVE=0
+SERVICE_WAS_ENABLED=0
 GENERATED_REFRESH_TOKEN=""
 
 log() { printf '[stock-portal] %s\n' "$*"; }
-fail() { printf '[stock-portal] ERROR: %s\n' "$*" >&2; exit 1; }
+fail() { printf '[stock-portal] ERROR: %s\n' "$*" >&2; return 1; }
 
 run_root() {
-  if [[ "$EUID" -eq 0 ]]; then "$@"; else sudo "$@"; fi
+  if [[ "$EUID" -eq 0 ]]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
 }
 
 run_as_app() {
@@ -51,22 +58,37 @@ validate_port() {
 
 validate_path() {
   local name="$1" value="$2"
-  [[ "$value" =~ ^/[A-Za-z0-9._/-]+$ ]] || fail "$name contains unsupported characters: $value"
+  [[ "$value" =~ ^/[A-Za-z0-9._/-]+$ ]] \
+    || fail "$name contains unsupported characters: $value"
 }
 
 cleanup() {
-  [[ -z "$BACKUP_DIR" || ! -d "$BACKUP_DIR" ]] || run_root rm -rf -- "$BACKUP_DIR"
+  if [[ -n "$BACKUP_DIR" && -d "$BACKUP_DIR" ]]; then
+    run_root rm -rf -- "$BACKUP_DIR" || true
+  fi
 }
 
 rollback() {
   local code="$1"
+  trap - ERR
   set +e
-  log "deployment failed; restoring portal and Nginx configuration"
-  [[ ! -f "$BACKUP_DIR/portal.html" ]] || run_root cp -a "$BACKUP_DIR/portal.html" "$PORTAL_FILE"
-  [[ ! -f "$BACKUP_DIR/nginx-site.conf" ]] || run_root cp -a "$BACKUP_DIR/nginx-site.conf" "$NGINX_SITE"
+
+  if [[ "$ROLLBACK_READY" != "1" ]]; then
+    exit "$code"
+  fi
+
+  log "deployment failed; restoring the previous portal deployment"
+  [[ ! -f "$BACKUP_DIR/portal.html" ]] \
+    || run_root cp -a "$BACKUP_DIR/portal.html" "$PORTAL_FILE"
+  [[ ! -f "$BACKUP_DIR/nginx-site.conf" ]] \
+    || run_root cp -a "$BACKUP_DIR/nginx-site.conf" "$NGINX_SITE"
+
   if [[ "$BAZI_WEB_EXISTED" == "1" && -d "$BACKUP_DIR/bazi-web" ]]; then
-    run_root find "$WEB_ROOT/bazi" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
+    run_root find "$WEB_ROOT/bazi" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + \
+      2>/dev/null || true
     run_root cp -a "$BACKUP_DIR/bazi-web/." "$WEB_ROOT/bazi/"
+  elif [[ "$BAZI_WEB_EXISTED" == "0" ]]; then
+    run_root rm -rf -- "$WEB_ROOT/bazi"
   fi
 
   if [[ "$UNIT_EXISTED" == "1" && -f "$BACKUP_DIR/service.unit" ]]; then
@@ -78,23 +100,34 @@ rollback() {
 
   if [[ "$ENV_EXISTED" == "1" && -f "$BACKUP_DIR/service.env" ]]; then
     run_root cp -a "$BACKUP_DIR/service.env" "$STOCK_ENV_FILE"
-  elif [[ "$ENV_EXISTED" == "0" ]]; then
+  else
     run_root rm -f -- "$STOCK_ENV_FILE"
   fi
 
   run_root systemctl daemon-reload >/dev/null 2>&1 || true
   if [[ "$UNIT_EXISTED" == "1" ]]; then
+    if [[ "$SERVICE_WAS_ENABLED" == "1" ]]; then
+      run_root systemctl enable "$STOCK_SERVICE.service" >/dev/null 2>&1 || true
+    else
+      run_root systemctl disable "$STOCK_SERVICE.service" >/dev/null 2>&1 || true
+    fi
     if [[ "$SERVICE_WAS_ACTIVE" == "1" ]]; then
       run_root systemctl restart "$STOCK_SERVICE.service" >/dev/null 2>&1 || true
     else
       run_root systemctl stop "$STOCK_SERVICE.service" >/dev/null 2>&1 || true
     fi
   fi
-  run_root nginx -t >/dev/null 2>&1 && run_root systemctl reload nginx.service >/dev/null 2>&1 || true
+
+  run_root nginx -t >/dev/null 2>&1 \
+    && run_root systemctl reload nginx.service >/dev/null 2>&1 || true
   exit "$code"
 }
 
-on_error() { local code=$?; rollback "$code"; }
+on_error() {
+  local code=$?
+  rollback "$code"
+}
+
 trap cleanup EXIT
 trap on_error ERR
 
@@ -138,12 +171,14 @@ build_bazi_frontend() {
     log "skipping bazi frontend build"
     return 0
   fi
+
   resolve_npm
-  log "rebuilding bazi frontend for external post-login redirect support"
+  log "rebuilding bazi frontend for post-login return to /$STOCK_BASE_PATH/"
   run_as_app env npm_config_audit=false npm_config_fund=false \
     "$NPM_BIN" --prefix "$BAZI_DIR/frontend" ci
   run_as_app env VITE_BASE_PATH=/bazi/ \
     "$NPM_BIN" --prefix "$BAZI_DIR/frontend" run build
+
   run_root install -d -o root -g root -m 755 "$WEB_ROOT/bazi"
   run_root find "$WEB_ROOT/bazi" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
   run_root cp -a "$BAZI_DIR/frontend/dist/." "$WEB_ROOT/bazi/"
@@ -151,16 +186,20 @@ build_bazi_frontend() {
 }
 
 install_dashboard_environment() {
+  local token temporary
   if [[ -s "$STOCK_ENV_FILE" && -z "${AS1455_DASHBOARD_REFRESH_TOKEN:-}" ]]; then
     log "preserving existing $STOCK_ENV_FILE"
     return 0
   fi
-  local token="${AS1455_DASHBOARD_REFRESH_TOKEN:-}" temporary
+
+  token="${AS1455_DASHBOARD_REFRESH_TOKEN:-}"
   if [[ -z "$token" ]]; then
     token="$(openssl rand -hex 24)"
     GENERATED_REFRESH_TOKEN="$token"
   fi
-  [[ "$token" =~ ^[A-Za-z0-9._-]+$ ]] || fail "refresh token may contain only letters, numbers, dot, underscore and hyphen"
+  [[ "$token" =~ ^[A-Za-z0-9._-]+$ ]] \
+    || fail "refresh token may contain only letters, numbers, dot, underscore and hyphen"
+
   temporary="$(mktemp)"
   chmod 600 "$temporary"
   printf 'AS1455_DASHBOARD_REFRESH_TOKEN=%s\n' "$token" > "$temporary"
@@ -170,7 +209,7 @@ install_dashboard_environment() {
 
 install_dashboard_service() {
   log "installing systemd service: $STOCK_SERVICE"
-  run_root tee "$STOCK_UNIT_FILE" >/dev/null <<EOF
+  run_root tee "$STOCK_UNIT_FILE" >/dev/null <<EOF_UNIT
 [Unit]
 Description=AS1455 Backtest Dashboard
 Wants=network-online.target
@@ -198,11 +237,13 @@ PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
-EOF
+EOF_UNIT
+
   run_root systemctl daemon-reload
   run_root systemctl enable "$STOCK_SERVICE.service"
   run_root systemctl restart "$STOCK_SERVICE.service"
-  wait_for_url "AS1455 dashboard" "http://127.0.0.1:$STOCK_PORT/$STOCK_BASE_PATH/_stcore/health"
+  wait_for_url "AS1455 dashboard" \
+    "http://127.0.0.1:$STOCK_PORT/$STOCK_BASE_PATH/_stcore/health"
 }
 
 patch_portal() {
@@ -243,8 +284,9 @@ bazi_port = int(os.environ["BAZI_API_PORT"])
 stock_port = int(os.environ["STOCK_PORT"])
 begin = "    # BEGIN AS1455 DASHBOARD"
 end = "    # END AS1455 DASHBOARD"
+auth_uri = "_as1455_portal_auth"
 block = f"""    # BEGIN AS1455 DASHBOARD
-    location = /_portal_auth {{
+    location = /{auth_uri} {{
         internal;
         proxy_pass http://127.0.0.1:{bazi_port}/api/v1/auth/me;
         proxy_pass_request_body off;
@@ -259,7 +301,7 @@ block = f"""    # BEGIN AS1455 DASHBOARD
     }}
 
     location ^~ /{base}/ {{
-        auth_request /_portal_auth;
+        auth_request /{auth_uri};
         error_page 401 403 =302 /bazi/login?external_redirect=/{base}/;
 
         proxy_pass http://127.0.0.1:{stock_port};
@@ -277,6 +319,7 @@ block = f"""    # BEGIN AS1455 DASHBOARD
         proxy_send_timeout 86400s;
     }}
     # END AS1455 DASHBOARD"""
+
 if begin in text:
     start = text.index(begin)
     finish = text.index(end, start) + len(end)
@@ -288,6 +331,15 @@ else:
     text = text[:closing] + "\n\n" + block + text[closing:]
 path.write_text(text, encoding="utf-8")
 PY
+}
+
+validate_gateway_route() {
+  local url="http://127.0.0.1:$PUBLIC_PORT/$STOCK_BASE_PATH/" status
+  status="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "$url")"
+  case "$status" in
+    200|302) log "gateway route responded with HTTP $status: $url" ;;
+    *) fail "gateway route returned HTTP $status: $url" ;;
+  esac
 }
 
 validate_port PUBLIC_PORT "$PUBLIC_PORT"
@@ -309,8 +361,8 @@ validate_path WEB_ROOT "$WEB_ROOT"
 validate_path STOCK_ENV_FILE "$STOCK_ENV_FILE"
 
 id "$APP_USER" >/dev/null 2>&1 || fail "application user does not exist: $APP_USER"
-[[ "$EUID" -ne 0 || "$(id -un)" == "$APP_USER" ]] || command -v runuser >/dev/null 2>&1 \
-  || fail "runuser is required"
+[[ "$EUID" -ne 0 || "$(id -un)" == "$APP_USER" ]] \
+  || command -v runuser >/dev/null 2>&1 || fail "runuser is required"
 command -v sudo >/dev/null 2>&1 || [[ "$EUID" -eq 0 ]] || fail "sudo is required"
 command -v systemctl >/dev/null 2>&1 || fail "systemd is required"
 command -v nginx >/dev/null 2>&1 || fail "nginx is required"
@@ -319,11 +371,13 @@ command -v python3 >/dev/null 2>&1 || fail "python3 is required"
 command -v openssl >/dev/null 2>&1 || fail "openssl is required"
 command -v git >/dev/null 2>&1 || fail "git is required"
 
-[[ -f "$BAZI_DIR/frontend/package-lock.json" ]] || fail "bazi frontend not found at $BAZI_DIR/frontend"
+[[ -f "$BAZI_DIR/frontend/package-lock.json" ]] \
+  || fail "bazi frontend not found at $BAZI_DIR/frontend"
 [[ -f "$BAZI_DIR/frontend/src/pages/LoginPage.vue" ]] || fail "bazi LoginPage.vue is missing"
 [[ -x "$STOCK_PYTHON" ]] || fail "stock virtual environment is missing: $STOCK_PYTHON"
 [[ -f "$STOCK_DIR/requirements-dashboard.txt" ]] || fail "requirements-dashboard.txt is missing"
-[[ -f "$STOCK_DIR/scripts/run_as1455_backtest_dashboard.sh" ]] || fail "dashboard launcher is missing"
+[[ -f "$STOCK_DIR/scripts/run_as1455_backtest_dashboard.sh" ]] \
+  || fail "dashboard launcher is missing"
 [[ -f "$PORTAL_FILE" ]] || fail "portal is not deployed: $PORTAL_FILE"
 [[ -f "$NGINX_SITE" ]] || fail "Nginx portal site is missing: $NGINX_SITE"
 grep -q 'external_redirect' "$BAZI_DIR/frontend/src/pages/LoginPage.vue" \
@@ -344,6 +398,9 @@ fi
 if run_root systemctl is-active --quiet "$STOCK_SERVICE.service"; then
   SERVICE_WAS_ACTIVE=1
 fi
+if run_root systemctl is-enabled --quiet "$STOCK_SERVICE.service"; then
+  SERVICE_WAS_ENABLED=1
+fi
 if [[ -f "$STOCK_UNIT_FILE" ]]; then
   UNIT_EXISTED=1
   run_root cp -a "$STOCK_UNIT_FILE" "$BACKUP_DIR/service.unit"
@@ -352,6 +409,7 @@ if [[ -f "$STOCK_ENV_FILE" ]]; then
   ENV_EXISTED=1
   run_root cp -a "$STOCK_ENV_FILE" "$BACKUP_DIR/service.env"
 fi
+ROLLBACK_READY=1
 
 install_dashboard_dependency
 build_bazi_frontend
@@ -362,6 +420,10 @@ patch_nginx
 run_root nginx -t
 run_root systemctl reload nginx.service
 wait_for_url "portal" "http://127.0.0.1:$PUBLIC_PORT/"
+validate_gateway_route
+
+grep -q "href=\"/$STOCK_BASE_PATH/\"" "$PORTAL_FILE" \
+  || fail "portal card validation failed"
 
 trap - ERR
 log "AS1455 dashboard portal integration succeeded"
