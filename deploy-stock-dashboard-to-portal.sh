@@ -67,7 +67,8 @@ check_branch() {
 }
 
 http_status() {
-  curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "$1"
+  curl --noproxy '*' --http1.1 --header 'Connection: close' \
+    --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "$1"
 }
 
 wait_for_status() {
@@ -81,6 +82,40 @@ wait_for_status() {
     sleep 1
   done
   fail "$name did not reach expected HTTP status ($expected); last=$status url=$url"
+}
+
+wait_for_nginx_gateway_generation() {
+  local readiness_path="/_as1455_${STOCK_BASE_PATH}_gateway_ready"
+  local url="http://127.0.0.1:$PUBLIC_PORT$readiness_path"
+  local headers status marker i consecutive=0
+
+  # systemctl reload returns after signalling the Nginx master, before the new
+  # workers necessarily accept requests. Require three fresh connections to
+  # observe the marker from the new configuration before validating /stock/.
+  for ((i = 1; i <= 100; i++)); do
+    headers="$(
+      curl --noproxy '*' --http1.1 --header 'Connection: close' \
+        --silent --show-error --dump-header - --output /dev/null \
+        --max-time 3 "$url" 2>/dev/null || true
+    )"
+    status="$(printf '%s\n' "$headers" | awk 'toupper($1) ~ /^HTTP\// {code=$2} END {print code}')"
+    marker="$(
+      printf '%s\n' "$headers" \
+        | awk 'BEGIN{IGNORECASE=1} /^X-AS1455-Gateway:/ {sub(/\r$/,""); sub(/^[^:]*:[[:space:]]*/,""); print; exit}'
+    )"
+    if [[ "$status" == "204" && "$marker" == "$STOCK_BASE_PATH" ]]; then
+      consecutive=$((consecutive + 1))
+      if (( consecutive >= 3 )); then
+        log "new Nginx gateway generation is active: $url"
+        return 0
+      fi
+    else
+      consecutive=0
+    fi
+    sleep 0.1
+  done
+
+  fail "new Nginx gateway generation did not become active: status=${status:-unknown} marker=${marker:-missing} url=$url"
 }
 
 resolve_npm() {
@@ -268,13 +303,20 @@ validate_auth_backend() {
 }
 
 validate_gateway_route() {
-  local url="http://127.0.0.1:$PUBLIC_PORT/$STOCK_BASE_PATH/" headers status location
-  headers="$(curl --silent --show-error --dump-header - --output /dev/null --max-time 10 "$url")"
+  local url="http://127.0.0.1:$PUBLIC_PORT/$STOCK_BASE_PATH/" headers status location location_path
+  headers="$(
+    curl --noproxy '*' --http1.1 --header 'Connection: close' \
+      --silent --show-error --dump-header - --output /dev/null --max-time 10 "$url"
+  )"
   status="$(printf '%s\n' "$headers" | awk 'toupper($1) ~ /^HTTP\// {code=$2} END {print code}')"
   location="$(printf '%s\n' "$headers" | awk 'BEGIN{IGNORECASE=1} /^Location:/ {sub(/\r$/,""); sub(/^[^:]*:[[:space:]]*/,""); print; exit}')"
+  location_path="$location"
+  if [[ "$location" =~ ^https?://[^/]+(/.*)$ ]]; then
+    location_path="${BASH_REMATCH[1]}"
+  fi
   if [[ "$status" == "200" ]]; then
     log "gateway route is directly accessible: $url"
-  elif [[ "$status" == "302" && "$location" == "/bazi/login?external_redirect=/$STOCK_BASE_PATH/" ]]; then
+  elif [[ "$status" == "302" && "$location_path" == "/bazi/login?external_redirect=/$STOCK_BASE_PATH/" ]]; then
     log "gateway route correctly redirects unauthenticated users: $location"
   else
     printf '%s\n' "$headers" >&2
@@ -346,6 +388,7 @@ patch_portal
 patch_nginx
 run_root nginx -t
 run_root systemctl reload nginx.service
+wait_for_nginx_gateway_generation
 wait_for_status "portal" "http://127.0.0.1:$PUBLIC_PORT/" '^200$'
 wait_for_status "bazi login page" "http://127.0.0.1:$PUBLIC_PORT/bazi/login" '^200$'
 validate_gateway_route
