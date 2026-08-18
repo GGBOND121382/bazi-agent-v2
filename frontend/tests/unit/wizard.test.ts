@@ -1,9 +1,10 @@
-/** Birth form unit tests — mobile rendering and draft persistence. */
+/** Birth form unit tests — mobile rendering and user-scoped draft persistence. */
 import { beforeEach, describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import ChartNewWizard from '@/pages/ChartNewWizard.vue'
+import type { CurrentUserDTO } from '@/api/schema'
 
 function buildRouter() {
   return createRouter({
@@ -24,8 +25,22 @@ async function mountForm() {
   return mount(ChartNewWizard, { global: { plugins: [router] } })
 }
 
+const testUser: CurrentUserDTO = {
+  user_id: 'user-1',
+  username: 'user1',
+  role: 'user',
+  enabled: true,
+  approval_status: 'approved',
+  must_change_password: false,
+  created_at: '2026-01-01T00:00:00Z',
+}
+
 describe('ChartNewWizard', () => {
-  beforeEach(() => localStorage.clear())
+  beforeEach(() => {
+    localStorage.clear()
+    sessionStorage.clear()
+    sessionStorage.setItem('bazi:current-user', JSON.stringify(testUser))
+  })
 
   it('renders the redesigned birth form', async () => {
     const wrapper = await mountForm()
@@ -37,12 +52,13 @@ describe('ChartNewWizard', () => {
     expect(wrapper.find('input[type="time"]').exists()).toBe(true)
   })
 
-  it('persists a draft when birth information changes', async () => {
+  it('persists a draft inside the current user namespace', async () => {
     const wrapper = await mountForm()
     const dateInput = wrapper.find('input[type="date"]')
     await dateInput.setValue('1995-12-22')
     await dateInput.trigger('change')
-    const draft = localStorage.getItem('bazi:draft:birth')
+    expect(localStorage.getItem('bazi:draft:birth')).toBeNull()
+    const draft = localStorage.getItem('bazi:user:user-1:draft:birth')
     expect(draft).toBeTruthy()
     expect(JSON.parse(draft ?? '{}').birthDate).toBe('1995-12-22')
   })
