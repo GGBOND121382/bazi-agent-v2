@@ -1,19 +1,22 @@
 <script setup lang="ts">
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useBaziClient } from '@/api'
 import type { UserPreferencesDTO } from '@/api/schema'
+import { clearCurrentUser, currentUserId } from '@/utils/user-context'
 
 const client = useBaziClient()
 const router = useRouter()
+const queryClient = useQueryClient()
+const userId = currentUserId()
 const saved = ref(false)
 const currentPassword = ref('')
 const newPassword = ref('')
 const confirmPassword = ref('')
 const passwordMessage = ref('')
 const passwordError = ref('')
-const preferences = useQuery({ queryKey: ['preferences'], queryFn: () => client.getUserPreferences() })
+const preferences = useQuery({ queryKey: ['preferences', userId], queryFn: () => client.getUserPreferences() })
 const configuration = useQuery({ queryKey: ['configuration'], queryFn: () => client.getConfiguration() })
 
 async function update(field: 'detail_level' | 'theme', value: string) {
@@ -32,7 +35,8 @@ async function updatePassword() {
   }
   try {
     await client.changePassword(currentPassword.value, newPassword.value)
-    sessionStorage.removeItem('bazi:current-user')
+    queryClient.clear()
+    clearCurrentUser()
     passwordMessage.value = '密码已修改，请重新登录。'
     setTimeout(() => router.replace('/login'), 800)
   } catch (cause) {
