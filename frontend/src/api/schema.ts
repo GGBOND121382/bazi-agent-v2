@@ -315,7 +315,6 @@ export type TemporalContextViewDTO = {
   seasonal_strength: Record<string, string>
 }
 
-
 export type ReportBlockDTO = {
   block_id: string
   block_type: 'heading' | 'paragraph' | 'fact_grid' | 'table' | 'timeline' | 'chart' | 'claim' | 'callout' | 'evidence_list'
@@ -352,8 +351,18 @@ export type ReportViewDTO = {
   limitations: string[]
 }
 
+export type HistoryChartDTO = {
+  chart_id: string
+  calculation_status: string
+  created_at: string
+  note: string
+  gender?: 'male' | 'female' | null
+  birth_date?: string | null
+  city?: string | null
+}
+
 export type HistoryDTO = {
-  charts: { chart_id: string; calculation_status: string; created_at: string; note: string }[]
+  charts: HistoryChartDTO[]
   reports: { report_id: string; chart_id: string; title: string; generated_at: string }[]
 }
 
