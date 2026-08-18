@@ -16,9 +16,11 @@ import type {
   ChatThreadSummaryDTO,
   ChatThreadDTO,
 } from './schema'
+import { getCurrentUser } from '@/utils/user-context'
 
 const REQUEST_ID_HEADER = 'X-Request-ID'
 const IDEMPOTENCY_HEADER = 'Idempotency-Key'
+const EXPECTED_USER_HEADER = 'X-Bazi-Expected-User-ID'
 const DEFAULT_API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`
 
 function uuid(): string {
@@ -59,6 +61,9 @@ export class BaziClient {
       [REQUEST_ID_HEADER]: `req_${uuid()}`,
       ...extraHeaders,
     }
+    const expectedUserId = getCurrentUser()?.user_id
+    if (expectedUserId) headers[EXPECTED_USER_HEADER] = expectedUserId
+
     const init: RequestInit = { method, headers, credentials: 'same-origin' }
     if (body !== undefined) init.body = JSON.stringify(body)
 
@@ -88,7 +93,6 @@ export class BaziClient {
     if (response.status === 204) return undefined as unknown as T
     return (await response.json()) as T
   }
-
 
   register(username: string, password: string): Promise<CurrentUserDTO> {
     return this.request<CurrentUserDTO>('POST', '/v1/auth/register', { username, password })
