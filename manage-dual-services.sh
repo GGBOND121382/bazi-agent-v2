@@ -5,17 +5,12 @@ BAZI_SERVICE="${BAZI_SERVICE:-bazi-agent-v2}"
 ZHONGYI_SERVICE="${ZHONGYI_SERVICE:-zhongyi-diag}"
 PUBLIC_PORT="${PUBLIC_PORT:-8000}"
 ZHONGYI_PORT="${ZHONGYI_PORT:-8100}"
-BAZI_API_PORT="${BAZI_API_PORT:-8101}"
-STOCK_PORT="${STOCK_PORT:-8501}"
-STOCK_BASE_PATH="${STOCK_BASE_PATH:-stock}"
-STOCK_SERVICE="${STOCK_SERVICE:-as1455-dashboard}"
 APP_USER="${APP_USER:-${SUDO_USER:-$(id -un)}}"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 BAZI_DIR="$SCRIPT_DIR"
 APP_HOME="$(getent passwd "$APP_USER" | cut -d: -f6)"
 ZHONGYI_DIR="${ZHONGYI_DIR:-$APP_HOME/zhongyi-diag}"
-STOCK_PRESERVE_SCRIPT="$BAZI_DIR/scripts/restore-stock-portal-if-present.sh"
 
 log() {
   printf '[dual-manage] %s\n' "$*"
@@ -55,7 +50,7 @@ Commands:
   status           Show service status
   logs             Follow logs for both applications
   update-zhongyi   Pull zhongyi-diag and redeploy only that service
-  update-all       Pull both repositories and run the full deployment; preserve an existing stock portal
+  update-all       Pull both repositories and run the full deployment
 EOF
 }
 
@@ -93,20 +88,6 @@ update_zhongyi() {
   log "zhongyi-diag update succeeded"
 }
 
-restore_stock_portal_if_present() {
-  [[ -f "$STOCK_PRESERVE_SCRIPT" ]] || {
-    log "stock preservation helper is absent; skipping"
-    return 0
-  }
-  env \
-    PUBLIC_PORT="$PUBLIC_PORT" \
-    BAZI_API_PORT="$BAZI_API_PORT" \
-    STOCK_PORT="$STOCK_PORT" \
-    STOCK_BASE_PATH="$STOCK_BASE_PATH" \
-    STOCK_SERVICE="$STOCK_SERVICE" \
-    bash "$STOCK_PRESERVE_SCRIPT"
-}
-
 [[ -n "$APP_HOME" ]] || fail "Could not resolve home directory for $APP_USER"
 id "$APP_USER" >/dev/null 2>&1 || fail "Application user does not exist: $APP_USER"
 command -v systemctl >/dev/null 2>&1 || fail "systemd is required"
@@ -134,11 +115,8 @@ case "${1:-}" in
     pull_repo "bazi-agent-v2" "$BAZI_DIR"
     pull_repo "zhongyi-diag" "$ZHONGYI_DIR"
     log "Running the full dual-service deployment"
-    env APP_USER="$APP_USER" ZHONGYI_DIR="$ZHONGYI_DIR" \
-      PUBLIC_PORT="$PUBLIC_PORT" ZHONGYI_PORT="$ZHONGYI_PORT" BAZI_API_PORT="$BAZI_API_PORT" \
+    exec env APP_USER="$APP_USER" ZHONGYI_DIR="$ZHONGYI_DIR" \
       bash "$BAZI_DIR/deploy-dual-services.sh"
-    restore_stock_portal_if_present
-    log "Full update succeeded"
     ;;
   -h|--help|help)
     usage
