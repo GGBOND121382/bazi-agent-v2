@@ -1,8 +1,14 @@
 import type { CurrentUserDTO } from '@/api/schema'
 
 const CURRENT_USER_KEY = 'bazi:current-user'
+const AUTH_EVENT_KEY = 'bazi:auth-event'
 const LEGACY_DRAFT_KEY = 'bazi:draft:birth'
 const LEGACY_CHART_META_PREFIX = 'bazi:chart-meta:'
+
+export type AuthChange = {
+  user_id: string | null
+  nonce: string
+}
 
 export function getCurrentUser(): CurrentUserDTO | null {
   try {
@@ -38,6 +44,30 @@ export function userStorageKey(key: string): string {
 
 export function chartMetaKey(chartId: string): string {
   return userStorageKey(`chart-meta:${chartId}`)
+}
+
+export function authEventKey(): string {
+  return AUTH_EVENT_KEY
+}
+
+export function publishAuthChange(userId: string | null): void {
+  const event: AuthChange = {
+    user_id: userId,
+    nonce: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  }
+  localStorage.setItem(AUTH_EVENT_KEY, JSON.stringify(event))
+}
+
+export function parseAuthChange(raw: string | null): AuthChange | null {
+  if (!raw) return null
+  try {
+    const value = JSON.parse(raw) as Partial<AuthChange> | null
+    if (!value || !('user_id' in value) || typeof value.nonce !== 'string') return null
+    if (value.user_id !== null && typeof value.user_id !== 'string') return null
+    return { user_id: value.user_id ?? null, nonce: value.nonce }
+  } catch {
+    return null
+  }
 }
 
 export function migrateLegacyStorageToAdmin(user: CurrentUserDTO): number {
