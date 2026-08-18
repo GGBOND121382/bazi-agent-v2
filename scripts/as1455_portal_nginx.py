@@ -182,12 +182,36 @@ def insert_into_block(text: str, block_index: int, payload: str) -> str:
     return text[:insert_at].rstrip() + "\n\n" + payload.rstrip() + "\n" + text[insert_at:]
 
 
-def dashboard_payload(bazi_port: int, stock_port: int, base: str) -> str:
+def _validate_base(value: str, label: str) -> str:
+    base = value.strip("/")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", base):
+        raise ValueError(f"invalid {label}: {base!r}")
+    return base
+
+
+def dashboard_payload(
+    bazi_port: int,
+    stock_port: int,
+    base: str,
+    execution_port: int = 8510,
+    execution_base: str = "stock-exec-api",
+) -> str:
+    base = _validate_base(base, "base path")
+    execution_base = _validate_base(execution_base, "execution base path")
+    if base == execution_base:
+        raise ValueError("dashboard and execution base paths must differ")
+
     readiness = f"/_as1455_{base}_gateway_ready"
+    execution_readiness = f"/_as1455_{execution_base}_gateway_ready"
     login_location = f"@as1455_{base}_login"
     return f"""    # BEGIN AS1455 DASHBOARD
     location = {readiness} {{
         add_header X-AS1455-Gateway \"{base}\" always;
+        return 204;
+    }}
+
+    location = {execution_readiness} {{
+        add_header X-AS1455-Execution-Gateway \"{execution_base}\" always;
         return 204;
     }}
 
@@ -227,6 +251,25 @@ def dashboard_payload(bazi_port: int, stock_port: int, base: str) -> str:
         proxy_read_timeout 86400s;
         proxy_send_timeout 86400s;
     }}
+
+    location = /{execution_base} {{
+        return 301 /{execution_base}/;
+    }}
+
+    location ^~ /{execution_base}/ {{
+        proxy_pass http://127.0.0.1:{execution_port}/;
+        proxy_http_version 1.1;
+        proxy_set_header Authorization $http_authorization;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Prefix /{execution_base};
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 650s;
+        proxy_send_timeout 650s;
+    }}
     # END AS1455 DASHBOARD"""
 
 
@@ -237,10 +280,13 @@ def patch_file(
     bazi_port: int,
     stock_port: int,
     base: str,
+    execution_port: int = 8510,
+    execution_base: str = "stock-exec-api",
 ) -> None:
-    base = base.strip("/")
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", base):
-        raise ValueError(f"invalid base path: {base!r}")
+    base = _validate_base(base, "base path")
+    execution_base = _validate_base(execution_base, "execution base path")
+    if base == execution_base:
+        raise ValueError("dashboard and execution base paths must differ")
 
     resolved = path.resolve()
     loaded_paths = loaded_config_paths(nginx_dump())
@@ -254,7 +300,13 @@ def patch_file(
     updated = insert_into_block(
         cleaned,
         candidate.block_index,
-        dashboard_payload(bazi_port, stock_port, base),
+        dashboard_payload(
+            bazi_port,
+            stock_port,
+            base,
+            execution_port,
+            execution_base,
+        ),
     )
     resolved.write_text(updated, encoding="utf-8")
 
@@ -275,6 +327,8 @@ def parser() -> argparse.ArgumentParser:
     patch.add_argument("--bazi-port", type=int, required=True)
     patch.add_argument("--stock-port", type=int, required=True)
     patch.add_argument("--base", required=True)
+    patch.add_argument("--execution-port", type=int, default=8510)
+    patch.add_argument("--execution-base", default="stock-exec-api")
     return root
 
 
@@ -292,6 +346,8 @@ def main() -> int:
                 args.bazi_port,
                 args.stock_port,
                 args.base,
+                args.execution_port,
+                args.execution_base,
             )
     except (OSError, UnicodeError, ValueError) as exc:
         print(f"as1455_portal_nginx: {exc}", file=sys.stderr)
