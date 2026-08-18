@@ -288,8 +288,14 @@ def require_user(
     session: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
     expected_user_id: Annotated[str | None, Header(alias=EXPECTED_USER_HEADER)] = None,
 ) -> CurrentUser:
-    if os.environ.get("BAZI_AUTH_DISABLED", "false").casefold() == "true":
+    auth_disabled = os.environ.get("BAZI_AUTH_DISABLED", "false").casefold() == "true"
+    # Keep the legacy anonymous development mode only for callers that have no
+    # authenticated browser identity at all. A real session must always win;
+    # otherwise a stale BAZI_AUTH_DISABLED=true collapses every logged-in account
+    # to owner_id='anonymous' and defeats per-user chart/report isolation.
+    if auth_disabled and session is None and expected_user_id is None:
         return CurrentUser("anonymous", "anonymous", "user", True, APPROVED, False, "")
+
     user = user_from_session(session)
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="login required")
