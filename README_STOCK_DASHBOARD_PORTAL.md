@@ -1,9 +1,10 @@
-# AS1455 看板接入统一门户
+# AS1455 看板与执行 API 接入统一门户
 
-该脚本把 `stock_realtime_v021_full` 中的 Streamlit 看板接到现有智能体门户：
+该接入同时保留两个 AS1455 外部入口：
 
 ```text
-http://服务器:8000/stock/
+http://服务器:8000/stock/           -> 127.0.0.1:8501
+http://服务器:8000/stock-exec-api/  -> 127.0.0.1:8510
 ```
 
 部署后结构：
@@ -12,10 +13,23 @@ http://服务器:8000/stock/
 /
 ├── /bazi/
 ├── /zhongyi/
-└── /stock/
+├── /stock/
+└── /stock-exec-api/
 ```
 
-`/stock/` 由 Nginx 反向代理到仅监听本机的 `127.0.0.1:8501`，并通过八字系统的 `bazi_session` Cookie 调用 `/api/v1/auth/me` 做访问认证。未登录用户会跳转到八字登录页，登录后返回股票看板。
+`/stock/` 是 Streamlit 看板，通过八字系统的 `bazi_session` Cookie 调用 `/api/v1/auth/me` 做访问认证。未登录用户会跳转到八字登录页，登录后返回股票看板。
+
+`/stock-exec-api/` 是手机 AS1455 执行批次拉取入口。Nginx 会去掉该前缀并代理到 `127.0.0.1:8510`，原样转发 `Authorization`。该入口不使用 Bazi Cookie 鉴权，而由 AS1455 execution API 自身校验 `Authorization: Bearer $AS1455_EXECUTION_API_TOKEN`。
+
+例如：
+
+```text
+/stock-exec-api/health
+    -> 127.0.0.1:8510/health
+
+/stock-exec-api/api/v1/execution/latest?experiment=...
+    -> 127.0.0.1:8510/api/v1/execution/latest?experiment=...
+```
 
 ## 前置条件
 
@@ -42,7 +56,7 @@ stock_realtime_v021_full: agent/ch17-as1455-clean
 
 股票工程需要已有 `.venv_as1455`。
 
-## 一键部署
+## 一键部署股票看板
 
 ```bash
 cd ~/stock_realtime_v021_full
@@ -63,68 +77,93 @@ sudo bash deploy-stock-dashboard-to-portal.sh
 3. 创建 `/etc/as1455-dashboard.env`；
 4. 创建并启动 `as1455-dashboard.service`；
 5. 给门户增加“AS1455 策略看板”入口；
-6. 给 Nginx 增加带登录认证的 `/stock/` 代理；
+6. 使用统一的 `scripts/as1455_portal_nginx.py` 写入 `/stock/` 和 `/stock-exec-api/` 两条路由；
 7. 检查 Streamlit 健康状态和 Nginx 配置；
 8. 失败时恢复原门户、八字前端静态文件、Nginx、systemd unit 和环境文件。
 
 脚本可重复执行。已有刷新口令默认保留；重复运行不会重复插入门户卡片或 Nginx 配置。
 
-## `update-all` 与股票看板
+## `update-all` 与 AS1455 路由
 
-`deploy-dual-services.sh` 会重建双智能体门户和 Nginx 主站配置。股票看板已经单独部署并处于健康状态时，日常更新应使用：
+`deploy-dual-services.sh` 会重建双智能体门户和 Nginx 主站配置。AS1455 看板已经部署过后，日常更新仍使用：
 
 ```bash
 cd ~/bazi-agent-v2
 ./manage-dual-services.sh update-all
 ```
 
-`update-all` 在完成双服务部署后会自动执行 `scripts/restore-stock-portal-if-present.sh`：
+`update-all` 最终执行的 `deploy-dual-services.sh` 会自动调用 `scripts/restore-stock-portal-if-present.sh`。该脚本会：
 
-- 检测 `as1455-dashboard.service` 是否正在运行；
-- 检查 `127.0.0.1:8501/stock/_stcore/health`；
+- 以已安装的 `as1455-dashboard.service` 作为 AS1455 门户接入标记；
+- 如果 8501 看板正在运行，检查 `/stock/_stcore/health`；
+- 探测 8510 execution API 的 `/health`，允许未带 token 时返回 `200` 或 `401`；
 - 恢复门户首页的 AS1455 卡片；
-- 使用 `scripts/as1455_portal_nginx.py` 恢复带 Bazi 登录鉴权的 `/stock/` Nginx 路由；
-- 执行 `nginx -t`、reload 和网关验证。
+- 恢复带 Bazi 登录鉴权的 `/stock/`；
+- 恢复由 Bearer token 自身鉴权的 `/stock-exec-api/`；
+- 执行 `nginx -t`、reload 和两条网关配置的 readiness 验证。
 
-因此再次执行 `update-all` 不需要重新部署或重启 stock dashboard，也不会再把 `/stock/` 接入永久覆盖掉。
+即使 8501 或 8510 某个上游暂时停止，已部署过的 Nginx 路由也会保留，不会因为下一次 `update-all` 被永久删除。
 
-如果确实直接手工运行了低层的 `deploy-dual-services.sh`，可在其完成后执行一次：
+直接运行低层 `deploy-dual-services.sh` 也会自动调用同一恢复脚本，不需要再人工补 Nginx。
+
+如需手工立即恢复当前服务器，可执行：
 
 ```bash
+cd ~/bazi-agent-v2
+git switch agent/mobile-ui-deterministic-chat
+git pull --ff-only
 bash scripts/restore-stock-portal-if-present.sh
 ```
 
-该脚本是幂等的；未安装或未运行 stock dashboard 的机器会直接跳过。
-
 ## 自定义参数
 
-```bash
-sudo env \
-  APP_USER="$USER" \
-  BAZI_DIR="$HOME/bazi-agent-v2" \
-  STOCK_DIR="$HOME/stock_realtime_v021_full" \
-  PUBLIC_PORT=8000 \
-  BAZI_API_PORT=8101 \
-  ZHONGYI_PORT=8100 \
-  STOCK_PORT=8501 \
-  STOCK_BASE_PATH=stock \
-  AS1455_DASHBOARD_REFRESH_TOKEN='替换为强口令' \
-  bash deploy-stock-dashboard-to-portal.sh
+默认参数：
+
+```text
+STOCK_PORT=8501
+STOCK_BASE_PATH=stock
+STOCK_EXEC_API_PORT=8510
+STOCK_EXEC_API_BASE_PATH=stock-exec-api
 ```
 
-脚本默认检查两个工程是否位于上述指定分支。确有需要时可以通过 `SKIP_BRANCH_CHECK=1` 跳过。
+需要修改时可在执行恢复/部署脚本前通过环境变量覆盖。
 
 ## 检查
 
+看板：
+
 ```bash
-sudo systemctl status as1455-dashboard nginx
 curl -f http://127.0.0.1:8501/stock/_stcore/health
-sudo nginx -t
+curl -I http://127.0.0.1:8000/stock/
 ```
 
-浏览器访问：
+执行 API：
+
+```bash
+curl -i \
+  -H "Authorization: Bearer $AS1455_EXECUTION_API_TOKEN" \
+  http://127.0.0.1:8510/health
+
+curl -i \
+  -H "Authorization: Bearer $AS1455_EXECUTION_API_TOKEN" \
+  http://127.0.0.1:8000/stock-exec-api/health
+```
+
+完整 Nginx 检查：
+
+```bash
+sudo nginx -t
+sudo nginx -T 2>/dev/null | grep -n -E 'stock|8510|8501'
+```
+
+浏览器访问股票看板：
 
 ```text
-http://服务器IP:8000/
 http://服务器IP:8000/stock/
+```
+
+手机执行器 API base URL：
+
+```text
+http://服务器IP:8000/stock-exec-api
 ```
