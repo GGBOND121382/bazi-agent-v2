@@ -10,11 +10,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import Cookie, Depends, HTTPException, Response, status
+from fastapi import Cookie, Depends, Header, HTTPException, Response, status
 
 from .persistence import connect
 
 SESSION_COOKIE = "bazi_session"
+EXPECTED_USER_HEADER = "X-Bazi-Expected-User-ID"
 APPROVED = "approved"
 PENDING = "pending"
 REJECTED = "rejected"
@@ -76,7 +77,7 @@ def _row_to_user(row: object) -> CurrentUser:
 
 
 def ensure_initial_accounts() -> None:
-    """Create the local admin and one approved demo user on a fresh database."""
+    """Create initial accounts and assign pre-account legacy data to admin."""
     admin_name = os.environ.get("INITIAL_ADMIN_USERNAME", "admin").strip() or "admin"
     admin_password = os.environ.get("INITIAL_ADMIN_PASSWORD", "wsxqaz@123")
     demo_name = os.environ.get("INITIAL_DEMO_USERNAME", "user123").strip() or "user123"
@@ -109,6 +110,25 @@ def ensure_initial_accounts() -> None:
                     now,
                 ),
             )
+    claim_legacy_data_for_admin()
+
+
+def claim_legacy_data_for_admin() -> int:
+    """Move only pre-account placeholder-owned records to the configured admin."""
+    admin_name = os.environ.get("INITIAL_ADMIN_USERNAME", "admin").strip() or "admin"
+    admin = get_user_by_username(admin_name)
+    if admin is None or not admin.is_admin:
+        return 0
+
+    migrated = 0
+    with connect() as conn:
+        for table in ("charts", "chat_threads", "llm_calls"):
+            result = conn.execute(
+                f"UPDATE {table} SET owner_id=? WHERE owner_id IN ('anonymous', '')",
+                (admin.user_id,),
+            )
+            migrated += max(result.rowcount, 0)
+    return migrated
 
 
 def create_user(
@@ -266,12 +286,18 @@ def user_from_session(token: str | None) -> CurrentUser | None:
 
 def require_user(
     session: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
+    expected_user_id: Annotated[str | None, Header(alias=EXPECTED_USER_HEADER)] = None,
 ) -> CurrentUser:
     if os.environ.get("BAZI_AUTH_DISABLED", "false").casefold() == "true":
         return CurrentUser("anonymous", "anonymous", "user", True, APPROVED, False, "")
     user = user_from_session(session)
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="login required")
+    if expected_user_id and expected_user_id != user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="session identity changed; login again",
+        )
     return user
 
 
