@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useQueryClient } from '@tanstack/vue-query'
 import { useBaziClient } from '@/api'
+import { clearCurrentUser, getCurrentUser } from '@/utils/user-context'
 import { useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
 const router = useRouter()
 const client = useBaziClient()
+const queryClient = useQueryClient()
 const pageTitle = computed(() => String(route.meta.title ?? '问真八字'))
 const chartId = computed(() => typeof route.params.chartId === 'string' ? route.params.chartId : null)
 const temporalTarget = computed(() => chartId.value ? `/charts/${chartId.value}/temporal` : '/history')
@@ -14,14 +17,14 @@ const showChrome = computed(() => route.name !== 'login' && route.name !== 'regi
 const currentUser = ref<{ role?: string; username?: string } | null>(null)
 
 function refreshCurrentUser() {
-  try { currentUser.value = JSON.parse(sessionStorage.getItem('bazi:current-user') ?? 'null') }
-  catch { currentUser.value = null }
+  currentUser.value = getCurrentUser()
 }
 watch(() => route.fullPath, refreshCurrentUser, { immediate: true })
 
 async function logout() {
-  try { await client.logout() } catch { /* browser cookie is cleared by route reset below */ }
-  sessionStorage.removeItem('bazi:current-user')
+  try { await client.logout() } catch { /* local private state is still cleared below */ }
+  queryClient.clear()
+  clearCurrentUser()
   await router.replace('/login')
 }
 
