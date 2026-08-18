@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRouter } from 'vue-router'
 import { useBaziClient } from '@/api'
-import type { HistoryDTO } from '@/api/schema'
+import type { HistoryChartDTO, HistoryDTO } from '@/api/schema'
 import { chartMetaKey, currentUserId } from '@/utils/user-context'
 
 const client = useBaziClient()
@@ -21,16 +21,26 @@ const { data, isLoading, isError, error } = useQuery<HistoryDTO>({
 })
 
 type ChartMeta = { name?: string; gender?: string; birthDate?: string; city?: string }
-function metaFor(chartId: string): ChartMeta {
+function localMetaFor(chartId: string): ChartMeta {
   const raw = localStorage.getItem(chartMetaKey(chartId))
   if (!raw) return {}
   try { return JSON.parse(raw) as ChartMeta } catch { return {} }
 }
 
+function displayMetaFor(chart: HistoryChartDTO): ChartMeta {
+  const local = localMetaFor(chart.chart_id)
+  return {
+    name: local.name,
+    gender: chart.gender ?? local.gender,
+    birthDate: chart.birth_date ?? local.birthDate,
+    city: chart.city ?? local.city,
+  }
+}
+
 const visibleCharts = computed(() => {
   const keyword = search.value.trim().toLowerCase()
   return (data.value?.charts ?? []).filter((chart) => {
-    const meta = metaFor(chart.chart_id)
+    const meta = displayMetaFor(chart)
     const genderMatch = filter.value === 'all' || meta.gender === filter.value
     const keywordMatch = !keyword || [meta.name, meta.birthDate, meta.city, chart.note, chart.chart_id]
       .some((item) => String(item ?? '').toLowerCase().includes(keyword))
@@ -87,12 +97,12 @@ async function reanalyse(chartId: string) {
       <article v-for="chart in visibleCharts" :key="chart.chart_id" class="user-list-item">
         <RouterLink class="user-main" :to="{ name: 'chart-overview', params: { chartId: chart.chart_id } }">
           <div>
-            <strong>{{ metaFor(chart.chart_id).name || '未命名命盘' }} <small>{{ metaFor(chart.chart_id).gender === 'female' ? '女' : metaFor(chart.chart_id).gender === 'male' ? '男' : '' }}</small></strong>
-            <span>阳历 {{ metaFor(chart.chart_id).birthDate || chart.created_at.slice(0, 10) }}</span>
+            <strong>{{ displayMetaFor(chart).name || '未命名命盘' }} <small>{{ displayMetaFor(chart).gender === 'female' ? '女' : displayMetaFor(chart).gender === 'male' ? '男' : '' }}</small></strong>
+            <span>阳历 {{ displayMetaFor(chart).birthDate || '出生日期未知' }}</span>
             <em v-if="chart.note">{{ chart.note }}</em>
           </div>
           <div class="user-pillars">
-            <span>{{ metaFor(chart.chart_id).city || '命盘' }}</span>
+            <span>{{ displayMetaFor(chart).city || '命盘' }}</span>
             <i>{{ chart.calculation_status === 'passed' ? '已排盘' : chart.calculation_status }}</i>
           </div>
           <div class="round-seal" aria-hidden="true">命</div>
