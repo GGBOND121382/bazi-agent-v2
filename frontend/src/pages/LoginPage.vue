@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 import { useBaziClient } from '@/api'
-import { migrateLegacyStorageToAdmin, setCurrentUser } from '@/utils/user-context'
+import { migrateLegacyStorageToAdmin, publishAuthChange, setCurrentUser } from '@/utils/user-context'
 
 const client = useBaziClient()
 const queryClient = useQueryClient()
@@ -34,6 +34,7 @@ async function submit() {
     queryClient.clear()
     setCurrentUser(user)
     migrateLegacyStorageToAdmin(user)
+    publishAuthChange(user.user_id)
     const externalRedirect = safeExternalRedirect(route.query.external_redirect)
     if (externalRedirect) {
       window.location.assign(externalRedirect)
