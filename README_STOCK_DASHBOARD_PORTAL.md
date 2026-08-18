@@ -69,6 +69,33 @@ sudo bash deploy-stock-dashboard-to-portal.sh
 
 脚本可重复执行。已有刷新口令默认保留；重复运行不会重复插入门户卡片或 Nginx 配置。
 
+## `update-all` 与股票看板
+
+`deploy-dual-services.sh` 会重建双智能体门户和 Nginx 主站配置。股票看板已经单独部署并处于健康状态时，日常更新应使用：
+
+```bash
+cd ~/bazi-agent-v2
+./manage-dual-services.sh update-all
+```
+
+`update-all` 在完成双服务部署后会自动执行 `scripts/restore-stock-portal-if-present.sh`：
+
+- 检测 `as1455-dashboard.service` 是否正在运行；
+- 检查 `127.0.0.1:8501/stock/_stcore/health`；
+- 恢复门户首页的 AS1455 卡片；
+- 使用 `scripts/as1455_portal_nginx.py` 恢复带 Bazi 登录鉴权的 `/stock/` Nginx 路由；
+- 执行 `nginx -t`、reload 和网关验证。
+
+因此再次执行 `update-all` 不需要重新部署或重启 stock dashboard，也不会再把 `/stock/` 接入永久覆盖掉。
+
+如果确实直接手工运行了低层的 `deploy-dual-services.sh`，可在其完成后执行一次：
+
+```bash
+bash scripts/restore-stock-portal-if-present.sh
+```
+
+该脚本是幂等的；未安装或未运行 stock dashboard 的机器会直接跳过。
+
 ## 自定义参数
 
 ```bash
@@ -101,5 +128,3 @@ sudo nginx -t
 http://服务器IP:8000/
 http://服务器IP:8000/stock/
 ```
-
-重新执行 `deploy-dual-services.sh` 会重写门户和 Nginx 配置；之后再执行本脚本即可恢复股票看板接入。
