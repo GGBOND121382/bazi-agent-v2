@@ -5,7 +5,6 @@ import os
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
-
 from fastapi import APIRouter, Depends, Header, status
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -62,21 +61,49 @@ def _charts() -> ChartService:
     return get_default_service()
 
 
+def _birth_date_from_basic(basic: dict[str, Any]) -> str | None:
+    for key in ("birth_datetime_local", "solar_datetime", "civil_time"):
+        value = basic.get(key)
+        if isinstance(value, str) and len(value) >= 10:
+            return value[:10]
+    return None
+
+
+def _city_from_basic(basic: dict[str, Any]) -> str | None:
+    birthplace = basic.get("birthplace")
+    if not isinstance(birthplace, dict):
+        return None
+    for key in ("city", "province"):
+        value = birthplace.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 @router.get("/history")
 def history(
     charts: ChartService = Depends(_charts),
     jobs: AnalysisJobService = Depends(_jobs),
     user: CurrentUser = Depends(require_user),
 ) -> dict[str, Any]:
-    chart_items = [
-        {
-            "chart_id": item.chart_id,
-            "calculation_status": item.calculation_status,
-            "created_at": item.created_at.isoformat(),
-            "note": item.note,
-        }
-        for item in charts.store.list_for_owner("*" if user.is_admin else user.user_id)
-    ]
+    chart_items: list[dict[str, Any]] = []
+    for item in charts.store.list_for_owner("*" if user.is_admin else user.user_id):
+        basic_source = item.chart.details.get("basic")
+        basic = basic_source if isinstance(basic_source, dict) else {}
+        gender_value = basic.get("gender")
+        gender = gender_value if gender_value in {"male", "female"} else None
+        chart_items.append(
+            {
+                "chart_id": item.chart_id,
+                "calculation_status": item.calculation_status,
+                "created_at": item.created_at.isoformat(),
+                "note": item.note,
+                "gender": gender,
+                "birth_date": _birth_date_from_basic(basic),
+                "city": _city_from_basic(basic),
+            }
+        )
+
     allowed_chart_ids = {item["chart_id"] for item in chart_items}
     report_items = [
         {
