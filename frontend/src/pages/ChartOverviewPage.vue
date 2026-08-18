@@ -9,6 +9,7 @@ import type {
   ChartResultDTO,
   DeterministicPillarDetail,
 } from '@/api/schema'
+import { chartMetaKey, currentUserId } from '@/utils/user-context'
 
 type ShenshaDetail = {
   name: string
@@ -26,13 +27,14 @@ type ShenshaDetail = {
 const props = defineProps<{ chartId: string }>()
 const client = useBaziClient()
 const router = useRouter()
+const userId = currentUserId()
 const useMocks = import.meta.env.VITE_USE_MOCKS === 'true'
 const analysisStarting = ref(false)
 const analysisError = ref<string | null>(null)
 const displayName = ref('命盘')
 
 onMounted(() => {
-  const raw = localStorage.getItem(`bazi:chart-meta:${props.chartId}`)
+  const raw = localStorage.getItem(chartMetaKey(props.chartId))
   if (!raw) return
   try {
     const meta = JSON.parse(raw) as { name?: string }
@@ -46,7 +48,7 @@ const { data, error, isLoading, isError, isFetching, refetch } = useQuery<{
   overview: ChartOverviewViewDTO
   chart: ChartResultDTO | null
 }>({
-  queryKey: computed(() => ['chart-overview-full', props.chartId]),
+  queryKey: computed(() => ['chart-overview-full', userId, props.chartId]),
   queryFn: async () => {
     if (useMocks) {
       return {
