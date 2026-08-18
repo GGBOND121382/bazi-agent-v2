@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { useBaziClient } from '@/api'
-import { clearCurrentUser, getCurrentUser } from '@/utils/user-context'
+import { clearCurrentUser, getCurrentUser, migrateLegacyStorageToAdmin } from '@/utils/user-context'
 import { useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
@@ -17,7 +17,9 @@ const showChrome = computed(() => route.name !== 'login' && route.name !== 'regi
 const currentUser = ref<{ role?: string; username?: string } | null>(null)
 
 function refreshCurrentUser() {
-  currentUser.value = getCurrentUser()
+  const user = getCurrentUser()
+  currentUser.value = user
+  if (user) migrateLegacyStorageToAdmin(user)
 }
 watch(() => route.fullPath, refreshCurrentUser, { immediate: true })
 
