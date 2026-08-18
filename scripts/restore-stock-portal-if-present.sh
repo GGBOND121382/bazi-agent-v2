@@ -6,6 +6,8 @@ BAZI_API_PORT="${BAZI_API_PORT:-8101}"
 STOCK_PORT="${STOCK_PORT:-8501}"
 STOCK_BASE_PATH="${STOCK_BASE_PATH:-stock}"
 STOCK_SERVICE="${STOCK_SERVICE:-as1455-dashboard}"
+STOCK_EXEC_API_PORT="${STOCK_EXEC_API_PORT:-8510}"
+STOCK_EXEC_API_BASE_PATH="${STOCK_EXEC_API_BASE_PATH:-stock-exec-api}"
 WEB_ROOT="${WEB_ROOT:-/var/www/dual-agents}"
 NGINX_SITE_AVAILABLE="${NGINX_SITE_AVAILABLE:-/etc/nginx/sites-available/dual-agents-8000}"
 
@@ -34,14 +36,18 @@ validate_port() {
 validate_port PUBLIC_PORT "$PUBLIC_PORT"
 validate_port BAZI_API_PORT "$BAZI_API_PORT"
 validate_port STOCK_PORT "$STOCK_PORT"
+validate_port STOCK_EXEC_API_PORT "$STOCK_EXEC_API_PORT"
 [[ "$STOCK_BASE_PATH" =~ ^[A-Za-z0-9._-]+$ ]] || fail "invalid STOCK_BASE_PATH"
+[[ "$STOCK_EXEC_API_BASE_PATH" =~ ^[A-Za-z0-9._-]+$ ]] || fail "invalid STOCK_EXEC_API_BASE_PATH"
+[[ "$STOCK_BASE_PATH" != "$STOCK_EXEC_API_BASE_PATH" ]] || fail "stock dashboard and execution API base paths must differ"
 [[ "$STOCK_SERVICE" =~ ^[A-Za-z0-9_.-]+$ ]] || fail "invalid STOCK_SERVICE"
 [[ -f "$NGINX_HELPER" ]] || fail "missing Nginx helper: $NGINX_HELPER"
 
-# Preserve the route whenever the dashboard unit is installed, even if it is
-# temporarily stopped. Machines that never installed the dashboard stay dual-only.
+# The dashboard unit is the installation marker for the AS1455 portal integration.
+# Preserve both /stock/ and /stock-exec-api/ even when either upstream is
+# temporarily stopped, so a dual-service redeploy never destroys their routes.
 if ! run_root systemctl cat "$STOCK_SERVICE.service" >/dev/null 2>&1; then
-  log "$STOCK_SERVICE.service is not installed; stock portal preservation skipped"
+  log "$STOCK_SERVICE.service is not installed; AS1455 gateway preservation skipped"
   exit 0
 fi
 
@@ -58,7 +64,17 @@ if run_root systemctl is-active --quiet "$STOCK_SERVICE.service"; then
   [[ "$health_status" == "200" ]] \
     || fail "installed stock service is active but unhealthy: HTTP ${health_status:-unknown} $health_url"
 else
-  log "$STOCK_SERVICE.service is installed but inactive; preserving gateway configuration without live health validation"
+  log "$STOCK_SERVICE.service is installed but inactive; preserving dashboard gateway without live health validation"
+fi
+
+execution_health_url="http://127.0.0.1:$STOCK_EXEC_API_PORT/health"
+execution_health_status="$(http_status "$execution_health_url" || true)"
+execution_active=0
+if [[ "$execution_health_status" == "200" || "$execution_health_status" == "401" ]]; then
+  execution_active=1
+  log "AS1455 execution API is reachable on $STOCK_EXEC_API_PORT (HTTP $execution_health_status without bearer token)"
+else
+  log "AS1455 execution API is not currently reachable; preserving /$STOCK_EXEC_API_BASE_PATH/ route without live health validation"
 fi
 
 [[ -f "$PORTAL_FILE" ]] || fail "portal is missing: $PORTAL_FILE"
@@ -85,27 +101,36 @@ path.write_text(html, encoding="utf-8")
 PY
 run_root chmod 644 "$PORTAL_FILE"
 
-log "restoring authenticated /$STOCK_BASE_PATH/ Nginx route"
+log "restoring /$STOCK_BASE_PATH/ dashboard and /$STOCK_EXEC_API_BASE_PATH/ execution API Nginx routes"
 run_root python3 "$NGINX_HELPER" patch \
   --file "$NGINX_SITE_AVAILABLE" \
   --port "$PUBLIC_PORT" \
   --web-root "$WEB_ROOT" \
   --bazi-port "$BAZI_API_PORT" \
   --stock-port "$STOCK_PORT" \
-  --base "$STOCK_BASE_PATH"
+  --base "$STOCK_BASE_PATH" \
+  --execution-port "$STOCK_EXEC_API_PORT" \
+  --execution-base "$STOCK_EXEC_API_BASE_PATH"
 
 run_root nginx -t
 run_root systemctl reload nginx.service
 
 readiness_url="http://127.0.0.1:$PUBLIC_PORT/_as1455_${STOCK_BASE_PATH}_gateway_ready"
+execution_readiness_url="http://127.0.0.1:$PUBLIC_PORT/_as1455_${STOCK_EXEC_API_BASE_PATH}_gateway_ready"
 readiness_status=""
+execution_readiness_status=""
 for _ in $(seq 1 30); do
   readiness_status="$(http_status "$readiness_url" || true)"
-  [[ "$readiness_status" == "204" ]] && break
+  execution_readiness_status="$(http_status "$execution_readiness_url" || true)"
+  if [[ "$readiness_status" == "204" && "$execution_readiness_status" == "204" ]]; then
+    break
+  fi
   sleep 0.2
 done
 [[ "$readiness_status" == "204" ]] \
-  || fail "restored Nginx generation did not become active"
+  || fail "restored dashboard Nginx generation did not become active"
+[[ "$execution_readiness_status" == "204" ]] \
+  || fail "restored execution API Nginx generation did not become active"
 
 grep -q "href=\"/$STOCK_BASE_PATH/\"" "$PORTAL_FILE" \
   || fail "stock portal card validation failed"
@@ -115,7 +140,17 @@ if [[ "$stock_active" == "1" ]]; then
   gateway_status="$(http_status "$gateway_url" || true)"
   [[ "$gateway_status" == "200" || "$gateway_status" == "302" ]] \
     || fail "restored stock gateway returned HTTP $gateway_status: $gateway_url"
-  log "stock portal preserved successfully (gateway HTTP $gateway_status)"
+  log "stock dashboard gateway preserved successfully (HTTP $gateway_status)"
 else
-  log "stock portal configuration preserved; dashboard service remains inactive"
+  log "stock dashboard gateway configuration preserved; dashboard service remains inactive"
+fi
+
+if [[ "$execution_active" == "1" ]]; then
+  execution_gateway_url="http://127.0.0.1:$PUBLIC_PORT/$STOCK_EXEC_API_BASE_PATH/health"
+  execution_gateway_status="$(http_status "$execution_gateway_url" || true)"
+  [[ "$execution_gateway_status" == "200" || "$execution_gateway_status" == "401" ]] \
+    || fail "restored execution API gateway returned HTTP $execution_gateway_status: $execution_gateway_url"
+  log "execution API gateway preserved successfully (HTTP $execution_gateway_status without bearer token)"
+else
+  log "execution API gateway configuration preserved; API service is currently unreachable"
 fi
