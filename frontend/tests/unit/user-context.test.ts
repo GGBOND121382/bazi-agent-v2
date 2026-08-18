@@ -5,15 +5,16 @@ import {
   clearCurrentUser,
   currentUserId,
   getCurrentUser,
+  migrateLegacyStorageToAdmin,
   setCurrentUser,
   userStorageKey,
 } from '@/utils/user-context'
 
-function user(userId: string): CurrentUserDTO {
+function user(userId: string, role: CurrentUserDTO['role'] = 'user'): CurrentUserDTO {
   return {
     user_id: userId,
     username: userId,
-    role: 'user',
+    role,
     enabled: true,
     approval_status: 'approved',
     must_change_password: false,
@@ -22,7 +23,10 @@ function user(userId: string): CurrentUserDTO {
 }
 
 describe('user-context', () => {
-  beforeEach(() => sessionStorage.clear())
+  beforeEach(() => {
+    sessionStorage.clear()
+    localStorage.clear()
+  })
 
   it('separates local storage namespaces by authenticated user', () => {
     setCurrentUser(user('admin-1'))
@@ -49,5 +53,30 @@ describe('user-context', () => {
 
     sessionStorage.setItem('bazi:current-user', '{bad json')
     expect(getCurrentUser()).toBeNull()
+  })
+
+  it('moves unscoped legacy browser data to admin only', () => {
+    localStorage.setItem('bazi:draft:birth', '{"name":"legacy draft"}')
+    localStorage.setItem('bazi:chart-meta:chart-1', '{"name":"legacy chart"}')
+
+    expect(migrateLegacyStorageToAdmin(user('user-1'))).toBe(0)
+    expect(localStorage.getItem('bazi:draft:birth')).toBeTruthy()
+    expect(localStorage.getItem('bazi:chart-meta:chart-1')).toBeTruthy()
+
+    const admin = user('admin-1', 'admin')
+    expect(migrateLegacyStorageToAdmin(admin)).toBe(2)
+    expect(localStorage.getItem('bazi:draft:birth')).toBeNull()
+    expect(localStorage.getItem('bazi:chart-meta:chart-1')).toBeNull()
+    expect(localStorage.getItem('bazi:user:admin-1:draft:birth')).toBe('{"name":"legacy draft"}')
+    expect(localStorage.getItem('bazi:user:admin-1:chart-meta:chart-1')).toBe('{"name":"legacy chart"}')
+  })
+
+  it('does not overwrite newer admin-scoped data during migration', () => {
+    localStorage.setItem('bazi:chart-meta:chart-1', '{"name":"legacy"}')
+    localStorage.setItem('bazi:user:admin-1:chart-meta:chart-1', '{"name":"newer"}')
+
+    expect(migrateLegacyStorageToAdmin(user('admin-1', 'admin'))).toBe(1)
+    expect(localStorage.getItem('bazi:chart-meta:chart-1')).toBeNull()
+    expect(localStorage.getItem('bazi:user:admin-1:chart-meta:chart-1')).toBe('{"name":"newer"}')
   })
 })
