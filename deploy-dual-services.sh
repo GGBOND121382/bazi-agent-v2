@@ -429,6 +429,16 @@ move_zhongyi_service
 install_portal
 install_nginx_site
 
+if [[ -f "$BAZI_DIR/scripts/restore-stock-portal-if-present.sh" ]]; then
+  env \
+    PUBLIC_PORT="$PUBLIC_PORT" \
+    BAZI_API_PORT="$BAZI_API_PORT" \
+    STOCK_PORT="${STOCK_PORT:-8501}" \
+    STOCK_BASE_PATH="${STOCK_BASE_PATH:-stock}" \
+    STOCK_SERVICE="${STOCK_SERVICE:-as1455-dashboard}" \
+    bash "$BAZI_DIR/scripts/restore-stock-portal-if-present.sh"
+fi
+
 wait_for_url "gateway" "http://127.0.0.1:$PUBLIC_PORT/"
 wait_for_url "bazi frontend" "http://127.0.0.1:$PUBLIC_PORT/bazi/"
 wait_for_url "bazi API through gateway" "http://127.0.0.1:$PUBLIC_PORT/bazi/api/v1/health"
