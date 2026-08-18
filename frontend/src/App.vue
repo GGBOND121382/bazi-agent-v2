@@ -1,8 +1,15 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { useBaziClient } from '@/api'
-import { clearCurrentUser, getCurrentUser, migrateLegacyStorageToAdmin } from '@/utils/user-context'
+import {
+  authEventKey,
+  clearCurrentUser,
+  getCurrentUser,
+  migrateLegacyStorageToAdmin,
+  parseAuthChange,
+  publishAuthChange,
+} from '@/utils/user-context'
 import { useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
@@ -23,10 +30,30 @@ function refreshCurrentUser() {
 }
 watch(() => route.fullPath, refreshCurrentUser, { immediate: true })
 
+function handleAuthStorage(event: StorageEvent) {
+  if (event.key !== authEventKey()) return
+  const change = parseAuthChange(event.newValue)
+  if (!change) return
+  const current = getCurrentUser()
+  if (!current || change.user_id === current.user_id) return
+
+  queryClient.clear()
+  clearCurrentUser()
+  currentUser.value = null
+  if (route.name !== 'login' && route.name !== 'register') {
+    void router.replace({ name: 'login', query: { redirect: route.fullPath } })
+  }
+}
+
+onMounted(() => window.addEventListener('storage', handleAuthStorage))
+onBeforeUnmount(() => window.removeEventListener('storage', handleAuthStorage))
+
 async function logout() {
   try { await client.logout() } catch { /* local private state is still cleared below */ }
   queryClient.clear()
   clearCurrentUser()
+  currentUser.value = null
+  publishAuthChange(null)
   await router.replace('/login')
 }
 
