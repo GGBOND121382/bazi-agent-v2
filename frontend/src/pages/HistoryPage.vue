@@ -4,22 +4,25 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRouter } from 'vue-router'
 import { useBaziClient } from '@/api'
 import type { HistoryDTO } from '@/api/schema'
+import { chartMetaKey, currentUserId } from '@/utils/user-context'
 
 const client = useBaziClient()
 const router = useRouter()
 const queryClient = useQueryClient()
+const userId = currentUserId()
+const historyQueryKey = ['history', userId] as const
 const editing = ref<Record<string, string>>({})
 const search = ref('')
 const filter = ref<'all' | 'male' | 'female'>('all')
 const openMenu = ref<string | null>(null)
 const { data, isLoading, isError, error } = useQuery<HistoryDTO>({
-  queryKey: ['history'],
+  queryKey: historyQueryKey,
   queryFn: () => client.getHistory(),
 })
 
 type ChartMeta = { name?: string; gender?: string; birthDate?: string; city?: string }
 function metaFor(chartId: string): ChartMeta {
-  const raw = localStorage.getItem(`bazi:chart-meta:${chartId}`)
+  const raw = localStorage.getItem(chartMetaKey(chartId))
   if (!raw) return {}
   try { return JSON.parse(raw) as ChartMeta } catch { return {} }
 }
@@ -38,14 +41,14 @@ const visibleCharts = computed(() => {
 async function saveNote(chartId: string, current: string) {
   await client.setChartNote(chartId, editing.value[chartId] ?? current)
   openMenu.value = null
-  await queryClient.invalidateQueries({ queryKey: ['history'] })
+  await queryClient.invalidateQueries({ queryKey: historyQueryKey })
 }
 
 async function remove(chartId: string) {
   if (!window.confirm('确定删除这个命盘吗？')) return
   await client.deleteChart(chartId)
-  localStorage.removeItem(`bazi:chart-meta:${chartId}`)
-  await queryClient.invalidateQueries({ queryKey: ['history'] })
+  localStorage.removeItem(chartMetaKey(chartId))
+  await queryClient.invalidateQueries({ queryKey: historyQueryKey })
 }
 
 async function reanalyse(chartId: string) {
