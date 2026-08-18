@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ApiError, useBaziClient, type BirthRequest } from '@/api'
+import { chartMetaKey, userStorageKey } from '@/utils/user-context'
 
 const router = useRouter()
 const client = useBaziClient()
@@ -9,6 +10,7 @@ const useMocks = import.meta.env.VITE_USE_MOCKS === 'true'
 const submitting = ref(false)
 const submitError = ref<string | null>(null)
 const showAdvanced = ref(false)
+const draftKey = userStorageKey('draft:birth')
 
 const form = ref({
   name: '',
@@ -28,12 +30,12 @@ const form = ref({
 })
 
 onMounted(() => {
-  const draft = localStorage.getItem('bazi:draft:birth')
+  const draft = localStorage.getItem(draftKey)
   if (!draft) return
   try {
     Object.assign(form.value, JSON.parse(draft))
   } catch {
-    localStorage.removeItem('bazi:draft:birth')
+    localStorage.removeItem(draftKey)
   }
 })
 
@@ -42,7 +44,7 @@ const coordinateText = computed(() => `北纬 ${Math.abs(form.value.latitude).to
 const canSubmit = computed(() => Boolean(form.value.birthDate && form.value.birthTime && form.value.timezone && form.value.city))
 
 function persistDraft() {
-  localStorage.setItem('bazi:draft:birth', JSON.stringify(form.value))
+  localStorage.setItem(draftKey, JSON.stringify(form.value))
 }
 
 function toggleAdvanced(event: Event) {
@@ -79,13 +81,13 @@ async function submit() {
     const chartId = useMocks
       ? 'demo_chart'
       : (await client.createChart(buildRequest())).chart_id
-    localStorage.setItem(`bazi:chart-meta:${chartId}`, JSON.stringify({
+    localStorage.setItem(chartMetaKey(chartId), JSON.stringify({
       name: form.value.name.trim() || '未命名命盘',
       gender: form.value.gender,
       birthDate: form.value.birthDate,
       city: form.value.city,
     }))
-    localStorage.removeItem('bazi:draft:birth')
+    localStorage.removeItem(draftKey)
     await router.push({ name: 'chart-overview', params: { chartId } })
   } catch (cause) {
     if (cause instanceof ApiError) submitError.value = `${cause.detail.error_code}: ${cause.detail.message_key}`
