@@ -10,7 +10,6 @@ WEB_ROOT="${WEB_ROOT:-/var/www/dual-agents}"
 NGINX_SITE_AVAILABLE="${NGINX_SITE_AVAILABLE:-/etc/nginx/sites-available/dual-agents-8000}"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-BAZI_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 NGINX_HELPER="$SCRIPT_DIR/as1455_portal_nginx.py"
 PORTAL_FILE="$WEB_ROOT/index.html"
 
@@ -39,17 +38,27 @@ validate_port STOCK_PORT "$STOCK_PORT"
 [[ "$STOCK_SERVICE" =~ ^[A-Za-z0-9_.-]+$ ]] || fail "invalid STOCK_SERVICE"
 [[ -f "$NGINX_HELPER" ]] || fail "missing Nginx helper: $NGINX_HELPER"
 
-# This helper is deliberately a no-op on machines where the stock dashboard
-# has never been deployed. The dual-service deployment remains usable there.
-if ! run_root systemctl is-active --quiet "$STOCK_SERVICE.service"; then
-  log "$STOCK_SERVICE.service is not active; stock portal preservation skipped"
+# Preserve the route whenever the dashboard unit is installed, even if it is
+# temporarily stopped. Machines that never installed the dashboard stay dual-only.
+if ! run_root systemctl cat "$STOCK_SERVICE.service" >/dev/null 2>&1; then
+  log "$STOCK_SERVICE.service is not installed; stock portal preservation skipped"
   exit 0
 fi
 
-health_url="http://127.0.0.1:$STOCK_PORT/$STOCK_BASE_PATH/_stcore/health"
-if [[ "$(http_status "$health_url" || true)" != "200" ]]; then
-  log "stock service is active but health endpoint is not ready; preservation skipped: $health_url"
-  exit 0
+stock_active=0
+if run_root systemctl is-active --quiet "$STOCK_SERVICE.service"; then
+  stock_active=1
+  health_url="http://127.0.0.1:$STOCK_PORT/$STOCK_BASE_PATH/_stcore/health"
+  health_status=""
+  for _ in $(seq 1 30); do
+    health_status="$(http_status "$health_url" || true)"
+    [[ "$health_status" == "200" ]] && break
+    sleep 0.2
+  done
+  [[ "$health_status" == "200" ]] \
+    || fail "installed stock service is active but unhealthy: HTTP ${health_status:-unknown} $health_url"
+else
+  log "$STOCK_SERVICE.service is installed but inactive; preserving gateway configuration without live health validation"
 fi
 
 [[ -f "$PORTAL_FILE" ]] || fail "portal is missing: $PORTAL_FILE"
@@ -89,21 +98,24 @@ run_root nginx -t
 run_root systemctl reload nginx.service
 
 readiness_url="http://127.0.0.1:$PUBLIC_PORT/_as1455_${STOCK_BASE_PATH}_gateway_ready"
+readiness_status=""
 for _ in $(seq 1 30); do
-  if [[ "$(http_status "$readiness_url" || true)" == "204" ]]; then
-    break
-  fi
+  readiness_status="$(http_status "$readiness_url" || true)"
+  [[ "$readiness_status" == "204" ]] && break
   sleep 0.2
 done
-[[ "$(http_status "$readiness_url" || true)" == "204" ]] \
+[[ "$readiness_status" == "204" ]] \
   || fail "restored Nginx generation did not become active"
-
-gateway_url="http://127.0.0.1:$PUBLIC_PORT/$STOCK_BASE_PATH/"
-gateway_status="$(http_status "$gateway_url" || true)"
-[[ "$gateway_status" == "200" || "$gateway_status" == "302" ]] \
-  || fail "restored stock gateway returned HTTP $gateway_status: $gateway_url"
 
 grep -q "href=\"/$STOCK_BASE_PATH/\"" "$PORTAL_FILE" \
   || fail "stock portal card validation failed"
 
-log "stock portal preserved successfully (gateway HTTP $gateway_status)"
+if [[ "$stock_active" == "1" ]]; then
+  gateway_url="http://127.0.0.1:$PUBLIC_PORT/$STOCK_BASE_PATH/"
+  gateway_status="$(http_status "$gateway_url" || true)"
+  [[ "$gateway_status" == "200" || "$gateway_status" == "302" ]] \
+    || fail "restored stock gateway returned HTTP $gateway_status: $gateway_url"
+  log "stock portal preserved successfully (gateway HTTP $gateway_status)"
+else
+  log "stock portal configuration preserved; dashboard service remains inactive"
+fi
