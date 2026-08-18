@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 import { useBaziClient } from '@/api'
+import { setCurrentUser } from '@/utils/user-context'
 
 const client = useBaziClient()
+const queryClient = useQueryClient()
 const route = useRoute()
 const router = useRouter()
 const username = ref('')
@@ -28,7 +31,8 @@ async function submit() {
   error.value = ''
   try {
     const user = await client.login(username.value, password.value)
-    sessionStorage.setItem('bazi:current-user', JSON.stringify(user))
+    queryClient.clear()
+    setCurrentUser(user)
     const externalRedirect = safeExternalRedirect(route.query.external_redirect)
     if (externalRedirect) {
       window.location.assign(externalRedirect)
