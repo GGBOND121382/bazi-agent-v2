@@ -12,6 +12,7 @@ import LoginPage from '@/pages/LoginPage.vue'
 import RegisterPage from '@/pages/RegisterPage.vue'
 import AdminPage from '@/pages/AdminPage.vue'
 import { useBaziClient } from '@/api'
+import { clearCurrentUser, getCurrentUser, setCurrentUser } from '@/utils/user-context'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -36,17 +37,21 @@ const router = createRouter({
   },
 })
 
-
 router.beforeEach(async (to) => {
   if (to.meta.public) return true
-  const cached = sessionStorage.getItem('bazi:current-user')
+
+  const cached = getCurrentUser()
   try {
-    const user = cached ? JSON.parse(cached) : await useBaziClient().getCurrentUser()
-    sessionStorage.setItem('bazi:current-user', JSON.stringify(user))
+    const user = await useBaziClient().getCurrentUser()
+    if (cached && cached.user_id !== user.user_id) {
+      clearCurrentUser()
+      return { name: 'login', query: { redirect: to.fullPath } }
+    }
+    setCurrentUser(user)
     if (to.meta.admin && user.role !== 'admin') return '/'
     return true
   } catch {
-    sessionStorage.removeItem('bazi:current-user')
+    clearCurrentUser()
     return { name: 'login', query: { redirect: to.fullPath } }
   }
 })
