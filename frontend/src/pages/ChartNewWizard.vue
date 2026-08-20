@@ -11,6 +11,7 @@ const submitting = ref(false)
 const submitError = ref<string | null>(null)
 const showAdvanced = ref(false)
 const draftKey = userStorageKey('draft:birth')
+const currentYear = new Date().getFullYear()
 
 const form = ref({
   name: '',
@@ -42,10 +43,67 @@ onMounted(() => {
 const locationText = computed(() => `${form.value.city || '未知地区'} · ${form.value.timezone}`)
 const coordinateText = computed(() => `北纬 ${Math.abs(form.value.latitude).toFixed(2)}°　东经 ${Math.abs(form.value.longitude).toFixed(2)}°`)
 const canSubmit = computed(() => Boolean(form.value.birthDate && form.value.birthTime && form.value.timezone && form.value.city))
+const birthMonths = Array.from({ length: 12 }, (_, index) => index + 1)
 
 function persistDraft() {
   localStorage.setItem(draftKey, JSON.stringify(form.value))
 }
+
+function readBirthDateParts() {
+  const [yearText, monthText, dayText] = form.value.birthDate.split('-')
+  const year = Number(yearText)
+  const month = Number(monthText)
+  const day = Number(dayText)
+  return {
+    year: Number.isInteger(year) && year >= 1 ? year : 1990,
+    month: Number.isInteger(month) && month >= 1 && month <= 12 ? month : 1,
+    day: Number.isInteger(day) && day >= 1 ? day : 1,
+  }
+}
+
+function writeBirthDate(year: number, month: number, day: number) {
+  const safeMonth = Math.min(12, Math.max(1, month))
+  const maxDay = new Date(year, safeMonth, 0).getDate()
+  const safeDay = Math.min(maxDay, Math.max(1, day))
+  form.value.birthDate = `${String(year).padStart(4, '0')}-${String(safeMonth).padStart(2, '0')}-${String(safeDay).padStart(2, '0')}`
+  persistDraft()
+}
+
+const birthYear = computed<number>({
+  get: () => readBirthDateParts().year,
+  set: (year) => {
+    const { month, day } = readBirthDateParts()
+    writeBirthDate(year, month, day)
+  },
+})
+
+const birthMonth = computed<number>({
+  get: () => readBirthDateParts().month,
+  set: (month) => {
+    const { year, day } = readBirthDateParts()
+    writeBirthDate(year, month, day)
+  },
+})
+
+const birthDay = computed<number>({
+  get: () => readBirthDateParts().day,
+  set: (day) => {
+    const { year, month } = readBirthDateParts()
+    writeBirthDate(year, month, day)
+  },
+})
+
+const birthYears = computed(() => {
+  const selectedYear = birthYear.value
+  const minYear = Math.min(1900, selectedYear)
+  const maxYear = Math.max(currentYear, selectedYear)
+  return Array.from({ length: maxYear - minYear + 1 }, (_, index) => maxYear - index)
+})
+
+const birthDays = computed(() => {
+  const { year, month } = readBirthDateParts()
+  return Array.from({ length: new Date(year, month, 0).getDate() }, (_, index) => index + 1)
+})
 
 function toggleAdvanced(event: Event) {
   showAdvanced.value = (event.currentTarget as HTMLDetailsElement).open
@@ -125,7 +183,20 @@ async function submit() {
       </div>
 
       <div class="datetime-grid">
-        <label><span>出生日期</span><input v-model="form.birthDate" type="date" required @change="persistDraft" /></label>
+        <label>
+          <span>出生日期</span>
+          <div class="birth-date-selects">
+            <select v-model.number="birthYear" aria-label="出生年份">
+              <option v-for="year in birthYears" :key="year" :value="year">{{ year }}年</option>
+            </select>
+            <select v-model.number="birthMonth" aria-label="出生月份">
+              <option v-for="month in birthMonths" :key="month" :value="month">{{ month }}月</option>
+            </select>
+            <select v-model.number="birthDay" aria-label="出生日期">
+              <option v-for="day in birthDays" :key="day" :value="day">{{ day }}日</option>
+            </select>
+          </div>
+        </label>
         <label><span>出生时间</span><input v-model="form.birthTime" type="time" required @change="persistDraft" /></label>
       </div>
 
@@ -163,3 +234,23 @@ async function submit() {
     </form>
   </section>
 </template>
+
+<style scoped>
+.birth-date-selects {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr 1fr;
+  gap: 8px;
+}
+
+.birth-date-selects select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 9px 4px;
+  border: 0;
+  border-bottom: 1px solid #ebe8e2;
+  border-radius: 0;
+  background: transparent;
+  color: #27241f;
+}
+</style>
