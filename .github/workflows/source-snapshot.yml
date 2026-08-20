@@ -1,0 +1,19 @@
+name: Source snapshot
+
+on:
+  push:
+    branches: [agent/mobile-ui-deterministic-chat]
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-snapshot
+          path: |
+            .
+            !.git/**
+          include-hidden-files: true
+          retention-days: 1

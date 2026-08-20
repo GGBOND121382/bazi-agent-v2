@@ -64,3 +64,5 @@ data/bazi_rag_dataset_v2_1/data/quarantine/
 data/bazi_rag_dataset_v2_1/data/low_trust/
 data/bazi_rag_dataset_v2_1/data/excluded/
 data/bazi_rag_dataset_v2_1/data/source_registry/
+config.local.env
+runtime/

@@ -1,14 +1,4 @@
-/**
- * Typed HTTP client for the Bazi backend.
- *
- * - All requests carry `X-Request-ID` for log correlation.
- * - All mutations require `Idempotency-Key`.
- * - Errors are normalised to `ApiErrorDTO` (matches contracts/schemas/api_error.schema.json).
- * - No retry logic here; TanStack Query owns retry policy.
- *
- * The client never falls back to a mock on error — that would mask real
- * regressions. Frontend tests can stub `fetch` directly.
- */
+/** Typed HTTP client for the Bazi backend. */
 import type {
   ApiErrorDTO,
   BirthRequest,
@@ -20,10 +10,18 @@ import type {
   AnalysisJobDTO,
   HistoryDTO,
   ConfigurationDTO,
+  FortuneChatRequestDTO,
+  FortuneChatResponseDTO,
+  CurrentUserDTO,
+  ChatThreadSummaryDTO,
+  ChatThreadDTO,
 } from './schema'
+import { getCurrentUser } from '@/utils/user-context'
 
 const REQUEST_ID_HEADER = 'X-Request-ID'
 const IDEMPOTENCY_HEADER = 'Idempotency-Key'
+const EXPECTED_USER_HEADER = 'X-Bazi-Expected-User-ID'
+const DEFAULT_API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`
 
 function uuid(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
@@ -39,7 +37,6 @@ export class ApiError extends Error {
 
 export interface ClientOptions {
   baseUrl?: string
-  /** Override for testing — defaults to window.fetch. */
   fetcher?: typeof fetch
 }
 
@@ -48,7 +45,7 @@ export class BaziClient {
   private readonly fetcher: typeof fetch
 
   constructor(opts: ClientOptions = {}) {
-    this.baseUrl = (opts.baseUrl ?? '/api').replace(/\/$/, '')
+    this.baseUrl = (opts.baseUrl ?? DEFAULT_API_BASE).replace(/\/$/, '')
     this.fetcher = opts.fetcher ?? globalThis.fetch.bind(globalThis)
   }
 
@@ -64,16 +61,24 @@ export class BaziClient {
       [REQUEST_ID_HEADER]: `req_${uuid()}`,
       ...extraHeaders,
     }
-    const init: RequestInit = { method, headers }
+    const expectedUserId = getCurrentUser()?.user_id
+    if (expectedUserId) headers[EXPECTED_USER_HEADER] = expectedUserId
+
+    const init: RequestInit = { method, headers, credentials: 'same-origin' }
     if (body !== undefined) init.body = JSON.stringify(body)
 
     const response = await this.fetcher(url, init)
     if (!response.ok) {
-      // Try to parse the error envelope; if it doesn't fit the schema,
-      // synthesise a generic INTERNAL_ERROR with safe fields.
       let detail: ApiErrorDTO
       try {
-        detail = (await response.json()) as ApiErrorDTO
+        const payload = await response.json() as ApiErrorDTO & { detail?: string }
+        detail = payload.error_code ? payload : {
+          schema_version: 'api-error-v1',
+          request_id: 'req_unknown',
+          error_code: response.status === 403 ? 'FORBIDDEN' : 'INVALID_INPUT',
+          message_key: payload.detail ?? 'request.failed',
+          retryable: false,
+        }
       } catch {
         detail = {
           schema_version: 'api-error-v1',
@@ -89,13 +94,57 @@ export class BaziClient {
     return (await response.json()) as T
   }
 
+  register(username: string, password: string): Promise<CurrentUserDTO> {
+    return this.request<CurrentUserDTO>('POST', '/v1/auth/register', { username, password })
+  }
+
+  login(username: string, password: string): Promise<CurrentUserDTO> {
+    return this.request<CurrentUserDTO>('POST', '/v1/auth/login', { username, password })
+  }
+
+  logout(): Promise<void> {
+    return this.request<void>('POST', '/v1/auth/logout')
+  }
+
+  getCurrentUser(): Promise<CurrentUserDTO> {
+    return this.request<CurrentUserDTO>('GET', '/v1/auth/me')
+  }
+
+  changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    return this.request<void>('POST', '/v1/auth/change-password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    })
+  }
+
+  listUsers(): Promise<CurrentUserDTO[]> {
+    return this.request<CurrentUserDTO[]>('GET', '/v1/admin/users')
+  }
+
+  createUser(username: string, password: string): Promise<CurrentUserDTO> {
+    return this.request<CurrentUserDTO>('POST', '/v1/admin/users', { username, password })
+  }
+
+  approveUser(userId: string): Promise<CurrentUserDTO> {
+    return this.request<CurrentUserDTO>('POST', `/v1/admin/users/${encodeURIComponent(userId)}/approve`)
+  }
+
+  rejectUser(userId: string): Promise<CurrentUserDTO> {
+    return this.request<CurrentUserDTO>('POST', `/v1/admin/users/${encodeURIComponent(userId)}/reject`)
+  }
+
+  resetUserPassword(userId: string, password?: string): Promise<void> {
+    return this.request<void>('POST', `/v1/admin/users/${encodeURIComponent(userId)}/reset-password`, password ? { password } : {})
+  }
+
+  getAdminUserData(userId: string): Promise<{ charts: HistoryDTO['charts']; reports: HistoryDTO['reports']; threads: ChatThreadSummaryDTO[] }> {
+    return this.request('GET', `/v1/admin/users/${encodeURIComponent(userId)}/data`)
+  }
+
   createChart(req: BirthRequest): Promise<ChartResultDTO> {
-    return this.request<ChartResultDTO>(
-      'POST',
-      '/v1/charts',
-      req,
-      { [IDEMPOTENCY_HEADER]: `idem_${uuid()}` },
-    )
+    return this.request<ChartResultDTO>('POST', '/v1/charts', req, {
+      [IDEMPOTENCY_HEADER]: `idem_${uuid()}`,
+    })
   }
 
   getChart(chartId: string): Promise<ChartResultDTO> {
@@ -110,7 +159,6 @@ export class BaziClient {
     return this.request<void>('DELETE', `/v1/charts/${encodeURIComponent(chartId)}`)
   }
 
-  // /v1/reports/{report_id} view (placeholder for I2)
   getChartOverviewView(chartId: string): Promise<ChartOverviewViewDTO> {
     return this.request<ChartOverviewViewDTO>(
       'GET',
@@ -118,15 +166,32 @@ export class BaziClient {
     )
   }
 
-  getTemporalContext(chartId: string, year: number): Promise<TemporalContextViewDTO> {
+  getTemporalContext(
+    chartId: string,
+    year: number,
+    targetDate?: string,
+  ): Promise<TemporalContextViewDTO> {
+    const query = targetDate ? `?target_date=${encodeURIComponent(targetDate)}` : ''
     return this.request<TemporalContextViewDTO>(
       'GET',
-      `/v1/charts/${encodeURIComponent(chartId)}/temporal/${year}`,
+      `/v1/charts/${encodeURIComponent(chartId)}/temporal/${year}${query}`,
     )
   }
 
   getReport(reportId: string): Promise<ReportViewDTO> {
     return this.request<ReportViewDTO>('GET', `/v1/reports/${encodeURIComponent(reportId)}`)
+  }
+
+  getReportGenerationTrace(reportId: string): Promise<Record<string, unknown>> {
+    return this.request('GET', `/v1/reports/${encodeURIComponent(reportId)}/generation-trace`)
+  }
+
+  listChatThreads(chartId: string): Promise<ChatThreadSummaryDTO[]> {
+    return this.request('GET', `/v1/charts/${encodeURIComponent(chartId)}/chat/threads`)
+  }
+
+  getChatThread(threadId: string): Promise<ChatThreadDTO> {
+    return this.request('GET', `/v1/chat/threads/${encodeURIComponent(threadId)}`)
   }
 
   startAnalysis(chartId: string, userFocus: string[]): Promise<AnalysisJobDTO> {
@@ -135,6 +200,14 @@ export class BaziClient {
       `/v1/charts/${encodeURIComponent(chartId)}/analyses`,
       { user_focus: userFocus, school: 'engineering_policy' },
       { [IDEMPOTENCY_HEADER]: `analysis_${uuid()}` },
+    )
+  }
+
+  chatAboutChart(chartId: string, request: FortuneChatRequestDTO): Promise<FortuneChatResponseDTO> {
+    return this.request<FortuneChatResponseDTO>(
+      'POST',
+      `/v1/charts/${encodeURIComponent(chartId)}/chat`,
+      request,
     )
   }
 

@@ -1,3 +1,12 @@
+from __future__ import annotations
+
+import os
+import tempfile
+
+_TEST_RUNTIME = tempfile.mkdtemp(prefix="bazi-agent-tests-")
+os.environ.setdefault("BAZI_RUNTIME_DIR", _TEST_RUNTIME)
+os.environ.setdefault("BAZI_AUTH_DISABLED", "true")
+
 """Backend pytest configuration.
 
 - Ensure the `app` package is importable when running `pytest` from the
@@ -5,8 +14,6 @@
 - Add the workspace root to sys.path so `app` and `contracts` resolve.
 - Define a session-scoped fixture for the calculation profile.
 """
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 

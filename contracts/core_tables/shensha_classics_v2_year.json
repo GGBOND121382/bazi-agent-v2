@@ -1,0 +1,401 @@
+{
+  "rules": [
+    {
+      "rule_id": "SHENSHA-SANGMEN-001",
+      "name": "丧门",
+      "reference": "year_branch",
+      "target_kind": "branch",
+      "mapping": {
+        "子": [
+          "寅"
+        ],
+        "丑": [
+          "卯"
+        ],
+        "寅": [
+          "辰"
+        ],
+        "卯": [
+          "巳"
+        ],
+        "辰": [
+          "午"
+        ],
+        "巳": [
+          "未"
+        ],
+        "午": [
+          "申"
+        ],
+        "未": [
+          "酉"
+        ],
+        "申": [
+          "戌"
+        ],
+        "酉": [
+          "亥"
+        ],
+        "戌": [
+          "子"
+        ],
+        "亥": [
+          "丑"
+        ]
+      },
+      "source": {
+        "title": "神煞大全（太乙书局整理）",
+        "locator": "丧门",
+        "url": "https://book.taiyi.me/命/神煞大全"
+      },
+      "exclude_anchor_position": true
+    },
+    {
+      "rule_id": "SHENSHA-DIAOKE-001",
+      "name": "吊客",
+      "reference": "year_branch",
+      "target_kind": "branch",
+      "mapping": {
+        "子": [
+          "戌"
+        ],
+        "丑": [
+          "亥"
+        ],
+        "寅": [
+          "子"
+        ],
+        "卯": [
+          "丑"
+        ],
+        "辰": [
+          "寅"
+        ],
+        "巳": [
+          "卯"
+        ],
+        "午": [
+          "辰"
+        ],
+        "未": [
+          "巳"
+        ],
+        "申": [
+          "午"
+        ],
+        "酉": [
+          "未"
+        ],
+        "戌": [
+          "申"
+        ],
+        "亥": [
+          "酉"
+        ]
+      },
+      "source": {
+        "title": "神煞大全（太乙书局整理）",
+        "locator": "吊客",
+        "url": "https://book.taiyi.me/命/神煞大全"
+      },
+      "exclude_anchor_position": true
+    },
+    {
+      "rule_id": "SHENSHA-PIMA-001",
+      "name": "披麻",
+      "reference": "year_branch",
+      "target_kind": "branch",
+      "mapping": {
+        "子": [
+          "酉"
+        ],
+        "丑": [
+          "戌"
+        ],
+        "寅": [
+          "亥"
+        ],
+        "卯": [
+          "子"
+        ],
+        "辰": [
+          "丑"
+        ],
+        "巳": [
+          "寅"
+        ],
+        "午": [
+          "卯"
+        ],
+        "未": [
+          "辰"
+        ],
+        "申": [
+          "巳"
+        ],
+        "酉": [
+          "午"
+        ],
+        "戌": [
+          "未"
+        ],
+        "亥": [
+          "申"
+        ]
+      },
+      "source": {
+        "title": "神煞大全（太乙书局整理）",
+        "locator": "披麻",
+        "url": "https://book.taiyi.me/命/神煞大全"
+      },
+      "exclude_anchor_position": true
+    },
+    {
+      "rule_id": "SHENSHA-GUCHEN-001",
+      "name": "孤辰",
+      "reference": "year_branch",
+      "target_kind": "branch",
+      "mapping": {
+        "亥": [
+          "寅"
+        ],
+        "子": [
+          "寅"
+        ],
+        "丑": [
+          "寅"
+        ],
+        "寅": [
+          "巳"
+        ],
+        "卯": [
+          "巳"
+        ],
+        "辰": [
+          "巳"
+        ],
+        "巳": [
+          "申"
+        ],
+        "午": [
+          "申"
+        ],
+        "未": [
+          "申"
+        ],
+        "申": [
+          "亥"
+        ],
+        "酉": [
+          "亥"
+        ],
+        "戌": [
+          "亥"
+        ]
+      },
+      "source": {
+        "title": "《三命通会》",
+        "locator": "论孤辰寡宿"
+      },
+      "exclude_anchor_position": true
+    },
+    {
+      "rule_id": "SHENSHA-GUASU-001",
+      "name": "寡宿",
+      "reference": "year_branch",
+      "target_kind": "branch",
+      "mapping": {
+        "亥": [
+          "戌"
+        ],
+        "子": [
+          "戌"
+        ],
+        "丑": [
+          "戌"
+        ],
+        "寅": [
+          "丑"
+        ],
+        "卯": [
+          "丑"
+        ],
+        "辰": [
+          "丑"
+        ],
+        "巳": [
+          "辰"
+        ],
+        "午": [
+          "辰"
+        ],
+        "未": [
+          "辰"
+        ],
+        "申": [
+          "未"
+        ],
+        "酉": [
+          "未"
+        ],
+        "戌": [
+          "未"
+        ]
+      },
+      "source": {
+        "title": "《三命通会》",
+        "locator": "论孤辰寡宿"
+      },
+      "exclude_anchor_position": true
+    },
+    {
+      "rule_id": "SHENSHA-HONGLUAN-001",
+      "name": "红鸾",
+      "reference": "year_branch",
+      "target_kind": "branch",
+      "mapping": {
+        "子": [
+          "卯"
+        ],
+        "丑": [
+          "寅"
+        ],
+        "寅": [
+          "丑"
+        ],
+        "卯": [
+          "子"
+        ],
+        "辰": [
+          "亥"
+        ],
+        "巳": [
+          "戌"
+        ],
+        "午": [
+          "酉"
+        ],
+        "未": [
+          "申"
+        ],
+        "申": [
+          "未"
+        ],
+        "酉": [
+          "午"
+        ],
+        "戌": [
+          "巳"
+        ],
+        "亥": [
+          "辰"
+        ]
+      },
+      "source": {
+        "title": "《三命通会》",
+        "locator": "红鸾天喜"
+      },
+      "exclude_anchor_position": true
+    },
+    {
+      "rule_id": "SHENSHA-TIANXI-001",
+      "name": "天喜",
+      "reference": "year_branch",
+      "target_kind": "branch",
+      "mapping": {
+        "子": [
+          "酉"
+        ],
+        "丑": [
+          "申"
+        ],
+        "寅": [
+          "未"
+        ],
+        "卯": [
+          "午"
+        ],
+        "辰": [
+          "巳"
+        ],
+        "巳": [
+          "辰"
+        ],
+        "午": [
+          "卯"
+        ],
+        "未": [
+          "寅"
+        ],
+        "申": [
+          "丑"
+        ],
+        "酉": [
+          "子"
+        ],
+        "戌": [
+          "亥"
+        ],
+        "亥": [
+          "戌"
+        ]
+      },
+      "source": {
+        "title": "《三命通会》",
+        "locator": "红鸾天喜"
+      },
+      "exclude_anchor_position": true
+    },
+    {
+      "rule_id": "SHENSHA-GOUJIAO-WZ-001",
+      "name": "勾绞煞",
+      "reference": "year_branch_goujiao",
+      "target_kind": "branch",
+      "variant": "wenzhen_compatible_v1",
+      "source": {
+        "title": "《三命通会》论勾绞；神煞大全（问真兼容显示）",
+        "locator": "命前三辰为展示命中位；阳男阴女称勾，阴男阳女称绞"
+      }
+    },
+    {
+      "rule_id": "SHENSHA-YUANCHEN-001",
+      "name": "元辰",
+      "reference": "year_branch_yuanchen",
+      "target_kind": "branch",
+      "mapping": {
+        "yang_male_yin_female": {
+          "子": "未",
+          "丑": "申",
+          "寅": "酉",
+          "卯": "戌",
+          "辰": "亥",
+          "巳": "子",
+          "午": "丑",
+          "未": "寅",
+          "申": "卯",
+          "酉": "辰",
+          "戌": "巳",
+          "亥": "午"
+        },
+        "yin_male_yang_female": {
+          "子": "巳",
+          "丑": "午",
+          "寅": "未",
+          "卯": "申",
+          "辰": "酉",
+          "巳": "戌",
+          "午": "亥",
+          "未": "子",
+          "申": "丑",
+          "酉": "寅",
+          "戌": "卯",
+          "亥": "辰"
+        }
+      },
+      "source": {
+        "title": "《三命通会》及神煞表整理",
+        "locator": "元辰按年支并分阳男阴女、阴男阳女查"
+      }
+    }
+  ]
+}

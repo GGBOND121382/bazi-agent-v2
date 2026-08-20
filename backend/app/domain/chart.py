@@ -5,7 +5,7 @@ The API layer converts ChartResult to the JSON shape; the domain never knows abo
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -51,6 +51,9 @@ class ChartResult:
     warnings: tuple[Warning, ...]
     qiyun: dict[str, object] | None = None
     dayun: tuple[dict[str, object], ...] = ()
+    # Complete deterministic display data: lunar date, solar terms, 胎元/命宫,
+    # per-pillar 十神/藏干/地势/空亡/纳音/神煞 and five-element counts.
+    details: dict[str, object] = field(default_factory=dict)
 
     @property
     def day_master(self) -> str:

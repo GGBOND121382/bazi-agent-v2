@@ -1,16 +1,36 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import EvidenceDrawer from '@/components/EvidenceDrawer.vue'
 import { useBaziClient } from '@/api'
-import type { ReportBlockDTO, ReportViewDTO } from '@/api/schema'
+import type { ChartResultDTO, ReportBlockDTO, ReportViewDTO } from '@/api/schema'
+import {
+  buildDayunDisplayMeta,
+  displayValue,
+  fieldLabel,
+  isWideStructuredField,
+  parseStructuredSummary,
+  structuredEntries,
+  structuredReferences,
+  type DayunDisplayMeta,
+  type StructuredSummary,
+} from '@/utils/report-presentation'
+
+type DisplayBlock = ReportBlockDTO & {
+  sectionAnchor: string
+  structuredSummary: StructuredSummary | null
+  dayunMeta: DayunDisplayMeta | null
+}
 
 const props = withDefaults(defineProps<{ reportId: string; printMode?: boolean }>(), { printMode: false })
 const client = useBaziClient()
 const professional = ref(false)
 const drawerOpen = ref(false)
 const selected = ref<ReportBlockDTO | null>(null)
+const generationTrace = ref<Record<string, unknown> | null>(null)
+const traceOpen = ref(false)
 const shareInfo = ref<{ share_id: string; share_token: string; expires_at: string } | null>(null)
+const chart = ref<ChartResultDTO | null>(null)
 const useMocks = import.meta.env.VITE_USE_MOCKS === 'true'
 const { data, isLoading, isError, error } = useQuery<ReportViewDTO>({
   queryKey: ['report', props.reportId],
@@ -21,18 +41,54 @@ const { data, isLoading, isError, error } = useQuery<ReportViewDTO>({
   },
 })
 
+let chartRequest = 0
+watch(data, (report) => {
+  const request = ++chartRequest
+  chart.value = null
+  if (!report || useMocks) return
+  void client.getChart(report.chart_id)
+    .then((result) => {
+      if (request === chartRequest) chart.value = result
+    })
+    .catch(() => {
+      if (request === chartRequest) chart.value = null
+    })
+}, { immediate: true })
+
+const displayBlocks = computed<DisplayBlock[]>(() => {
+  let sectionAnchor = ''
+  let dayunOrdinal = 0
+  return (data.value?.blocks ?? []).map((block) => {
+    if (block.block_type === 'heading') {
+      sectionAnchor = block.anchor ?? ''
+      if (sectionAnchor === 'dayun-lifecycle') dayunOrdinal = 0
+    }
+    const isDayun = block.block_type === 'claim' && sectionAnchor === 'dayun-lifecycle'
+    const currentOrdinal = dayunOrdinal
+    if (isDayun) dayunOrdinal += 1
+    return {
+      ...block,
+      sectionAnchor,
+      structuredSummary: block.block_type === 'claim' ? parseStructuredSummary(block.summary) : null,
+      dayunMeta: isDayun
+        ? buildDayunDisplayMeta(block.title ?? '大运阶段', currentOrdinal, chart.value)
+        : null,
+    }
+  })
+})
+
 const drawerItems = computed(() => {
   if (!selected.value || !data.value) return []
   const block = selected.value
   const facts = (block.fact_ids ?? []).map((id) => ({ id, layer: 'fact' as const, title: id, detail: '后端确定性计算事实' }))
-  const rules = (block.rule_ids ?? []).map((id) => ({ id, layer: 'rule' as const, title: id, detail: '版本化规则引用' }))
+  const rules = (block.rule_ids ?? []).map((id) => ({ id, layer: 'rule' as const, title: id, detail: '命理规则依据' }))
   const model = (block.evidence_ids ?? []).map((id) => {
     const citation = data.value?.citations.find((item) => item.evidence_id === id)
     return {
       id,
       layer: 'model' as const,
       title: citation?.title ?? id,
-      detail: citation?.source_label ?? '审核证据',
+      detail: citation?.source_label ?? 'RAG 参考资料',
       ...(citation?.locator ? { locator: citation.locator } : {}),
     }
   })
@@ -43,51 +99,111 @@ function showEvidence(block: ReportBlockDTO) {
   selected.value = block
   drawerOpen.value = true
 }
-
-async function share() {
-  shareInfo.value = await client.createShare(props.reportId)
+async function showGenerationTrace() {
+  generationTrace.value ??= await client.getReportGenerationTrace(props.reportId)
+  traceOpen.value = true
 }
-
+async function share() { shareInfo.value = await client.createShare(props.reportId) }
 async function revokeShare() {
   if (!shareInfo.value) return
   await client.revokeShare(shareInfo.value.share_id)
   shareInfo.value = null
 }
-
-function printReport() {
-  window.print()
-}
+function printReport() { window.print() }
 </script>
 
 <template>
-  <section class="report-layout" aria-labelledby="report-title">
-    <p v-if="isLoading" data-state="loading">正在加载报告…</p>
-    <p v-else-if="isError" data-state="error" role="alert">{{ error?.message }}</p>
+  <section class="report-page" aria-labelledby="report-title">
+    <p v-if="isLoading" class="state-card">正在加载命理分析…</p>
+    <p v-else-if="isError" class="state-card error-card" role="alert">{{ error?.message }}</p>
     <template v-else-if="data">
-      <aside class="toc"><strong>目录</strong><a v-for="item in data.toc" :key="item.anchor" :href="`#${item.anchor}`">{{ item.title }}</a></aside>
+      <header class="report-hero">
+        <span class="report-seal">析</span>
+        <div><p class="eyebrow">大模型 + 确定性规则综合分析</p><h1 id="report-title">{{ data.title }}</h1>
+          <p>生成于 {{ new Date(data.generated_at).toLocaleString('zh-CN') }}</p>
+        </div>
+      </header>
+
+      <nav class="report-toc" aria-label="报告目录">
+        <a v-for="item in data.toc" :key="item.anchor" :href="`#${item.anchor}`">{{ item.title }}</a>
+      </nav>
+
+      <div class="report-toolbar card-surface">
+        <label class="switch-label"><input v-model="professional" type="checkbox" /><span>专业模式</span></label>
+        <button type="button" @click="printReport">打印 / PDF</button>
+        <button type="button" @click="showGenerationTrace">查看生成过程</button>
+        <button v-if="!printMode" type="button" @click="share">限时分享</button>
+        <button v-if="shareInfo" type="button" @click="revokeShare">撤销</button>
+      </div>
+      <p v-if="shareInfo" class="share-token card-surface">分享令牌：<code>{{ shareInfo.share_token }}</code><br />过期时间：{{ shareInfo.expires_at }}</p>
+
       <article class="report-body">
-        <header><p class="eyebrow">验证后的结构化报告</p><h1 id="report-title">{{ data.title }}</h1>
-          <label><input v-model="professional" type="checkbox" /> 专业模式</label>
-          <button type="button" @click="printReport">打印 / 保存 PDF</button>
-          <button v-if="!printMode" type="button" @click="share">创建限时分享</button>
-          <button v-if="shareInfo" type="button" @click="revokeShare">撤销分享</button>
-          <p v-if="shareInfo" class="share-token">分享令牌仅显示一次：<code>{{ shareInfo.share_token }}</code>，过期时间 {{ shareInfo.expires_at }}</p>
-        </header>
-        <template v-for="block in data.blocks" :key="block.block_id">
-          <component :is="`h${block.level ?? 2}`" v-if="block.block_type === 'heading'" :id="block.anchor ?? undefined">{{ block.text }}</component>
-          <p v-else-if="block.block_type === 'paragraph'">{{ block.text }}</p>
-          <aside v-else-if="block.block_type === 'callout'" class="callout" :data-tone="block.tone"><strong>{{ block.title }}</strong><p>{{ block.text }}</p></aside>
-          <article v-else-if="block.block_type === 'claim'" class="claim-card">
-            <span>模型归纳 · 置信度 {{ block.confidence ?? '—' }}</span><h2>{{ block.title }}</h2><p>{{ block.summary }}</p>
-            <p v-if="professional && block.counterevidence?.length"><strong>反向证据：</strong>{{ block.counterevidence.join('；') }}</p>
-            <button type="button" @click="showEvidence(block)">查看事实、规则与证据</button>
-          </article>
-          <ul v-else-if="block.block_type === 'evidence_list'"><li v-for="id in block.evidence_ids" :key="id">{{ id }}</li></ul>
-          <p v-else class="block-alternative">{{ block.text_alternative ?? '该结构块请在专业模式中查看。' }}</p>
+        <template v-for="block in displayBlocks" :key="block.block_id">
+          <component :is="`h${block.level ?? 2}`" v-if="block.block_type === 'heading'" :id="block.anchor ?? undefined" class="report-heading">{{ block.text }}</component>
+          <p v-else-if="block.block_type === 'paragraph'" class="report-paragraph">{{ block.text }}</p>
+          <aside v-else-if="block.block_type === 'callout'" class="callout card-surface" :data-tone="block.tone"><strong>{{ block.title }}</strong><p>{{ block.text }}</p></aside>
+          <section v-else-if="block.block_type === 'claim' && block.dayunMeta" class="dayun-card card-surface" :data-pre-qiyun="block.dayunMeta.isPreQiyun">
+            <div class="dayun-marker" aria-hidden="true"><span>{{ block.dayunMeta.isPreQiyun ? '启' : '运' }}</span></div>
+            <div class="dayun-content">
+              <header class="dayun-card-header">
+                <span class="dayun-stage-badge">{{ block.dayunMeta.stageLabel }}</span>
+                <i v-if="block.confidence">置信度 {{ Math.round(block.confidence * 100) }}%</i>
+              </header>
+              <div class="dayun-title-row">
+                <h2>{{ block.title }}</h2>
+                <div class="dayun-time-labels" aria-label="大运年龄与年份">
+                  <span>{{ block.dayunMeta.ageLabel }}</span>
+                  <span>{{ block.dayunMeta.periodLabel }}</span>
+                </div>
+              </div>
+              <p>{{ block.summary }}</p>
+              <div v-if="professional && block.counterevidence?.length" class="counter-evidence"><strong>其他可能：</strong>{{ block.counterevidence.join('；') }}</div>
+              <button type="button" class="evidence-button" @click="showEvidence(block)">查看命盘事实与参考资料</button>
+            </div>
+          </section>
+          <section v-else-if="block.block_type === 'claim' && block.structuredSummary" class="claim-card structured-claim-card card-surface">
+            <header><span>结构化看板</span><i v-if="block.confidence">置信度 {{ Math.round(block.confidence * 100) }}%</i></header>
+            <h2>{{ block.title }}</h2>
+            <dl class="structured-grid">
+              <div
+                v-for="([key, value], index) in structuredEntries(block.structuredSummary)"
+                :key="`${key}-${index}`"
+                class="structured-field"
+                :class="{ wide: isWideStructuredField(key, value) }"
+              >
+                <dt>{{ fieldLabel(key) }}</dt>
+                <dd>{{ displayValue(value) }}</dd>
+              </div>
+            </dl>
+            <div v-if="professional && structuredReferences(block.structuredSummary).length" class="structured-references">
+              <span v-for="reference in structuredReferences(block.structuredSummary)" :key="reference">{{ reference }}</span>
+            </div>
+            <button type="button" class="evidence-button" @click="showEvidence(block)">查看命盘事实与参考资料</button>
+          </section>
+          <section v-else-if="block.block_type === 'claim'" class="claim-card card-surface">
+            <header><span>综合判断</span><i v-if="block.confidence">置信度 {{ Math.round(block.confidence * 100) }}%</i></header>
+            <h2>{{ block.title }}</h2><p>{{ block.summary }}</p>
+            <div v-if="professional && block.counterevidence?.length" class="counter-evidence"><strong>其他可能：</strong>{{ block.counterevidence.join('；') }}</div>
+            <button type="button" class="evidence-button" @click="showEvidence(block)">查看命盘事实与参考资料</button>
+          </section>
+          <ul v-else-if="block.block_type === 'evidence_list'" class="evidence-list"><li v-for="id in block.evidence_ids" :key="id">{{ id }}</li></ul>
+          <p v-else class="block-alternative">{{ block.text_alternative ?? '该内容块暂不支持展示。' }}</p>
         </template>
-        <section class="limitations"><h2>限制说明</h2><ul><li v-for="item in data.limitations" :key="item">{{ item }}</li></ul></section>
       </article>
+
+      <section v-if="data.limitations.length" class="supplement-panel card-surface">
+        <h2>补充说明</h2><p v-for="item in data.limitations" :key="item">{{ item }}</p>
+      </section>
+
+      <RouterLink class="full-primary-button button-link" :to="{ name: 'chart-chat', params: { chartId: data.chart_id } }">基于本命盘继续追问</RouterLink>
+      <EvidenceDrawer :open="drawerOpen" :items="drawerItems" @close="drawerOpen = false" />
+      <div v-if="traceOpen" class="drawer-backdrop" @click.self="traceOpen = false">
+        <aside class="evidence-drawer generation-trace-drawer" role="dialog" aria-modal="true">
+          <header><div><p class="eyebrow">可审计分析轨迹</p><h2>报告生成过程</h2></div><button type="button" @click="traceOpen = false">关闭</button></header>
+          <p>包含实际 Prompt、命盘上下文、RAG 命中、模型原始输出、Reflection、验证和修复轮次。</p>
+          <pre>{{ JSON.stringify(generationTrace, null, 2) }}</pre>
+        </aside>
+      </div>
     </template>
-    <EvidenceDrawer :open="drawerOpen" :items="drawerItems" @close="drawerOpen = false" />
   </section>
 </template>

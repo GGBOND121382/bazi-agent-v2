@@ -16,15 +16,12 @@ from app.api.v1.analyses import _analysis_service
 from app.jobs import AnalysisJobService, InMemoryAnalysisStore
 from app.services.agent import AnalysisPipeline
 from app.services.chart_service import ChartService
-from app.services.rag import CorpusGovernance, HybridRetriever, SourceCatalog
-from app.services.rag.seed import import_approved_seed
 
 ROOT = Path(__file__).resolve().parents[3]
 
 
 class ContractProvider:
     def complete_json(self, **kwargs: Any) -> ProviderResponse:
-        item = kwargs["input_payload"]["retrieved_evidence"][0]
         return ProviderResponse(
             model_id="contract-mock",
             prompt_version=kwargs["prompt_version"],
@@ -33,13 +30,28 @@ class ContractProvider:
                 "analysis_id": "analysis_contract",
                 "chart_id": kwargs["input_payload"]["chart_id"],
                 "school": "engineering_policy",
+                "kinship_assessment": [
+                    {"relation": name, "conclusion": "结合六亲星、宫位和岁运分析。"}
+                    for name in ["父亲", "母亲", "兄弟姐妹", "配偶婚恋", "子女", "家庭互动"]
+                ],
+                "health_assessment": [
+                    {"dimension": name, "conclusion": "结合原局偏性和岁运变化分析。"}
+                    for name in ["五行偏性", "寒暖燥湿", "传统脏腑", "保护因素", "大运变化", "生活建议"]
+                ],
+                "dayun_assessment": [
+                    {"stage": "出生至起运", "conclusion": "说明起运前阶段。"},
+                    *[
+                        {"stage": str(item.get("ganzhi", "大运")), "conclusion": "逐柱分析该步大运。"}
+                        for item in kwargs["input_payload"]["analysis_context"]["temporal_hierarchy"]["dayun_sequence"]
+                    ],
+                ],
                 "claims": [{
                     "claim_id": "claim_contract",
                     "topic": "引用",
                     "statement": "在本规则体系下，解释可能保持可追溯。",
                     "fact_ids": ["FACT-Y-1"],
-                    "rule_ids": [item["evidence_id"]],
-                    "evidence_ids": [item["evidence_id"]],
+                    "rule_ids": [],
+                    "evidence_ids": [],
                     "counterevidence": [],
                     "confidence": 0.6,
                     "temporal_scope": "natal",
@@ -60,14 +72,9 @@ def test_analysis_job_sse_resume_and_report_contract() -> None:
         "calculation_profile_id": "ziping_standard_v1",
     })
     _, chart_id, _ = charts.create_chart(request=request, idempotency_key="contract-chart")
-    governance = CorpusGovernance(
-        SourceCatalog.load(ROOT / "contracts" / "rag_seed" / "source_catalog.json")
-    )
-    import_approved_seed(governance, ROOT / "contracts" / "rag_seed" / "rules_seed.jsonl")
-    retriever = HybridRetriever(governance.approved_chunks())
     service = AnalysisJobService(
         chart_service=charts,
-        pipeline_factory=lambda: AnalysisPipeline(provider=ContractProvider(), retriever=retriever),
+        pipeline_factory=lambda: AnalysisPipeline(provider=ContractProvider()),
         store=InMemoryAnalysisStore(),
     )
     app = create_app()

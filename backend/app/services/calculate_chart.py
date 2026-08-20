@@ -21,6 +21,7 @@ from ..domain.chart import ChartResult
 from ..domain.pillars import FourPillars
 from ..domain.profile import CalculationProfile, load_profile
 from ..domain.rules.qiyun_dayun import compute_qiyun_and_dayun
+from ..domain.rules.temporal import compute_exact_yun
 from ..domain.time import NormalizedTime
 
 
@@ -46,11 +47,9 @@ def default_deps() -> CalculationDeps:
         from ..adapters.calendar import SxtwlAdapter
 
         probe = SxtwlAdapter()
-        # Actually invoke sxtwl; this is the only thing that proves the lib is usable.
         probe.calculate(_dt(2000, 1, 1, 12, 0, tzinfo=UTC))
         secondary = probe
     except Exception:
-        # sxtwl missing or unbuildable; ReferenceAdapter stays.
         pass
     return CalculationDeps(
         primary=primary,
@@ -76,14 +75,7 @@ def calculate(
     chart_id: str | None = None,
     gender: str = "unspecified",
 ) -> ChartResult:
-    """Deterministic chart calculation.
-
-    Steps:
-    1. Ensure profile is loaded (default: ziping_standard_v1).
-    2. Run primary adapter.
-    3. Cross-check against secondary; raise CrossEngineConflictError on drift.
-    4. Merge facts/warnings/engine_versions into a ChartResult.
-    """
+    """Deterministic chart calculation."""
     if utc.tzinfo is None or utc.utcoffset() != UTC.utcoffset(utc):
         raise ValueError("utc must be a timezone-aware UTC datetime")
     calendar_time = calendar_time or utc
@@ -94,7 +86,6 @@ def calculate(
     deps = deps or default_deps()
 
     primary = deps.primary.calculate(calendar_time)
-    # Cross-check; raise on any drift (fail-closed).
     deps.comparer.assert_no_conflict(calendar_time)
     secondary = deps.secondary.calculate(calendar_time)
 
@@ -108,30 +99,39 @@ def calculate(
         if callable(nearest_jie)
         else None
     )
-    qiyun_result = compute_qiyun_and_dayun(
-        pillars=pillars,
-        birth_utc=utc,
-        gender=gender,
-        profile=profile,
-        reference_jie_utc=reference_jie_utc,
-    )
-    qiyun = {
-        "start_age_years": qiyun_result.start_age_years,
-        "direction": qiyun_result.direction,
-        "reference_jie_utc": qiyun_result.reference_jie_utc.isoformat(),
-        "rule_id": "QIYUN-GENDER-YINYANG-V1",
-    }
-    dayun = tuple(
-        {
-            "index": period.index,
-            "start_age": period.start_age,
-            "end_age": period.end_age,
-            "ganzhi": period.ganzhi,
-            "fact_id": f"DAYUN-{period.index}",
-            "rule_id": "DAYUN-60-CYCLE-V1",
+    try:
+        exact_qiyun, exact_dayun = compute_exact_yun(calendar_time, gender=gender)
+        if reference_jie_utc is not None:
+            exact_qiyun["reference_jie_utc"] = reference_jie_utc.isoformat()
+        qiyun = exact_qiyun
+        dayun = tuple(exact_dayun)
+    except Exception:
+        # Retain a deterministic fallback for environments where the primary
+        # library cannot expose Yun, but never label it as the exact v2 result.
+        qiyun_result = compute_qiyun_and_dayun(
+            pillars=pillars,
+            birth_utc=utc,
+            gender=gender,
+            profile=profile,
+            reference_jie_utc=reference_jie_utc,
+        )
+        qiyun = {
+            "start_age_years": qiyun_result.start_age_years,
+            "direction": qiyun_result.direction,
+            "reference_jie_utc": qiyun_result.reference_jie_utc.isoformat(),
+            "rule_id": "QIYUN-GENDER-YINYANG-FALLBACK-V1",
         }
-        for period in qiyun_result.dayun
-    )
+        dayun = tuple(
+            {
+                "index": period.index,
+                "start_age": period.start_age,
+                "end_age": period.end_age,
+                "ganzhi": period.ganzhi,
+                "fact_id": f"DAYUN-{period.index}",
+                "rule_id": "DAYUN-60-CYCLE-FALLBACK-V1",
+            }
+            for period in qiyun_result.dayun
+        )
 
     return ChartResult(
         chart_id=chart_id or f"chart_{uuid.uuid4().hex[:12]}",
@@ -146,6 +146,7 @@ def calculate(
         warnings=merged_warnings,
         qiyun=qiyun,
         dayun=dayun,
+        details=dict(primary.details),
     )
 
 

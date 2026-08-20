@@ -1,0 +1,73 @@
+{
+  "schema_version": "professional-prompt-eval-v1",
+  "rubric": {
+    "fact_fidelity": 20,
+    "seasonal_strength_and_day_master": 15,
+    "hidden_stems_and_ten_gods": 10,
+    "relations_and_transformation_conditions": 10,
+    "pattern_and_useful_gods": 15,
+    "temporal_hierarchy": 15,
+    "shensha_and_nayin_weighting": 5,
+    "counterevidence_and_reflection": 10
+  },
+  "cases": [
+    {
+      "case_id": "female_19990629_noon",
+      "pillars": ["己卯", "庚午", "壬子", "丙午"],
+      "required_facts": [
+        "壬日主生午月",
+        "日坐子水",
+        "庚印透月",
+        "子午冲",
+        "2026年癸酉大运、丙午流年"
+      ],
+      "required_dimensions": [
+        "旺相休囚死",
+        "得令得地得势",
+        "藏干十神",
+        "格局候选与排除条件",
+        "调候扶抑病药通关",
+        "用神相神喜神忌神",
+        "大运流年流月层级",
+        "神煞柱位与喜忌",
+        "反向证据",
+        "reflection"
+      ],
+      "forbidden_errors": [
+        "重新排盘",
+        "仅按五行数量判强弱",
+        "见合即化",
+        "缺什么补什么",
+        "只凭神煞断事",
+        "跳过癸酉大运直接断丙午流日"
+      ]
+    },
+    {
+      "case_id": "reference_19951222_shen_hour",
+      "pillars": ["乙亥", "戊子", "丁亥", "戊申"],
+      "required_facts": [
+        "丁日主生子月",
+        "亥子半会水",
+        "申亥相害",
+        "亥亥自刑"
+      ],
+      "required_dimensions": [
+        "寒暖调候",
+        "根气与透干",
+        "合会刑害主次",
+        "格局候选",
+        "喜用条件",
+        "神煞辅助"
+      ],
+      "forbidden_errors": [
+        "把半会直接写成完整三会",
+        "以神煞数量计算吉凶",
+        "纳音覆盖月令结论"
+      ]
+    }
+  ],
+  "examples": {
+    "bad": "日主水弱，喜金水，事业有机会但要谨慎。",
+    "good_structure": "先以月令判时令，再分得令、得地、得势列支持与反证；核验格局成立和破格条件；区分调候、扶抑、病药、通关取用；最后把大运、流年、流月、流日作为逐层触发，并仅用神煞和纳音辅助印证。"
+  }
+}

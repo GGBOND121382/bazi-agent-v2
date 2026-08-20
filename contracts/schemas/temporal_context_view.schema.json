@@ -4,14 +4,91 @@
   "title": "TemporalContextView",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "chart_id", "target_year", "breadcrumb", "year", "months"],
+  "required": [
+    "schema_version",
+    "chart_id",
+    "target_year",
+    "breadcrumb",
+    "dayuns",
+    "year",
+    "months",
+    "seasonal_strength",
+    "interactions",
+    "interaction_summary"
+  ],
   "properties": {
-    "schema_version": {"const": "temporal-context-view-v1"},
-    "chart_id": {"type": "string"},
-    "target_year": {"type": "integer", "minimum": 1900, "maximum": 2200},
-    "breadcrumb": {"type": "array", "items": {"type": "object"}},
-    "active_dayun": {"type": ["object", "null"]},
-    "year": {"type": "object"},
-    "months": {"type": "array", "minItems": 12, "maxItems": 12, "items": {"type": "object"}}
+    "schema_version": {
+      "const": "temporal-context-view-v1"
+    },
+    "chart_id": {
+      "type": "string"
+    },
+    "target_year": {
+      "type": "integer",
+      "minimum": 1900,
+      "maximum": 2200
+    },
+    "breadcrumb": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "active_dayun": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "year": {
+      "type": "object"
+    },
+    "months": {
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 12,
+      "items": {
+        "type": "object"
+      }
+    },
+    "qiyun": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "dayuns": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "selected_day": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "seasonal_strength": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "selected_month": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "interactions": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "interaction_summary": {
+      "type": "object"
+    }
   }
 }

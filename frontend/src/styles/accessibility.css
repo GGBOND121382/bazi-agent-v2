@@ -1,0 +1,97 @@
+:root {
+  --gold: #765a1e;
+  --gold-deep: #6d5525;
+  --muted: #625e57;
+}
+
+/* Readable secondary text on the warm white and light-gray surfaces. */
+.bottom-nav a,
+.page-heading p,
+.feature-card small,
+.assistant-entry p,
+.line-field > span,
+.datetime-grid label > span,
+.advanced-grid label > span,
+.segmented-control button,
+.birth-preview span,
+.info-panel span,
+.pillar-grid > span:first-child,
+.pillar-header-row strong,
+.five-element-panel small,
+.relation-panel small,
+.year-picker label span,
+.fortune-breadcrumb small,
+.month-grid-new span,
+.month-grid-new small,
+.user-main strong small,
+.user-main span,
+.user-pillars i,
+.recent-reports span,
+.field-row span,
+.claim-card header i,
+.privacy-note,
+.supplement-panel p,
+.block-alternative {
+  color: #625e57;
+}
+
+/* Small gold labels need a darker tone on light surfaces. */
+.eyebrow,
+.gold-action,
+.advanced-form summary,
+.month-calendar header a,
+.answer-list strong,
+.claim-card header > span,
+.citation-details,
+.evidence-button,
+.record-tabs button.active {
+  color: #6d5525;
+}
+
+/* Restore a light gold where the same labels sit on dark cards. */
+.hero-card .eyebrow,
+.chart-identity-card .eyebrow,
+.report-hero .eyebrow {
+  color: #e1ca8c;
+}
+
+/* Active pills retain the screenshot's gold treatment with AA contrast. */
+.segmented-control button.active,
+.vip-corner {
+  background: #765a1e;
+  color: #fff;
+}
+
+/* Semantic colors in the dense pillar table remain distinguishable and readable. */
+.multi-row > div > span { color: #1769aa; }
+.multi-row small { color: #237a2e; }
+.shensha-row > div > span { color: #6d5525; }
+
+/* History metadata and note accents. */
+.user-main em { color: #705a2b; }
+.more-button { color: #625e57; }
+
+/* Ensure the gold foreground is readable on pale call-to-action surfaces. */
+.quick-question-row button,
+.relation-chip,
+.month-grid-new strong,
+.selected-month-panel strong,
+.report-toc a,
+.evidence-button {
+  color: #6d5525;
+}
+
+/* Keep the screenshot-style four-column chart fully visible on phone widths. */
+@media (max-width: 720px) {
+  .pillar-panel { overflow-x: hidden; }
+  .pillar-grid {
+    min-width: 0;
+    grid-template-columns: 52px repeat(4, minmax(0, 1fr));
+  }
+  .pillar-grid > span:first-child { padding: 9px 6px; font-size: .76rem; }
+  .pillar-grid > strong,
+  .pillar-grid > div { min-width: 0; padding: 9px 4px; font-size: .84rem; overflow-wrap: anywhere; }
+  .gan-row strong,
+  .zhi-row strong { font-size: 1.95rem; }
+  .multi-row > div > span { grid-template-columns: 1fr; gap: 1px; }
+}

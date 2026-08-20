@@ -1,6 +1,10 @@
-"""A2 structured analysis, deterministic verification, and report assembly."""
+"""Professional structured analysis, deterministic verification, and reports."""
 
-from .orchestrator import AnalysisPipeline, AnalysisPipelineError, AnalysisPipelineResult
+from .professional_core import (
+    AnalysisPipeline,
+    AnalysisPipelineError,
+    AnalysisPipelineResult,
+)
 from .report import ReportAssembler
 from .verifier import verify_analysis
 

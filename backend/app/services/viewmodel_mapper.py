@@ -1,10 +1,7 @@
-"""Domain ChartResult → ChartResultDTO mapper.
-
-The mapper is the only place where domain objects become wire-format DTOs.
-Any change to this file should be matched by a corresponding update in
-contracts/schemas/json_schema/chart_result.schema.json (or its view schemas).
-"""
+"""Domain ChartResult → API/view-model DTO mappers."""
 from __future__ import annotations
+
+from typing import Any, cast
 
 from ..api.dto import (
     ChartOverviewViewDTO,
@@ -16,6 +13,96 @@ from ..api.dto import (
     WarningDTO,
 )
 from ..domain.chart import ChartResult
+from ..domain.profile import load_profile
+from ..domain.rules import evaluate_relations, evaluate_shensha
+from ..domain.rules.relations import RuleProfile
+from ..domain.rules.shensha import ShenshaRuleProfile
+
+_RELATION_LABELS = {
+    "stem_combination": "天干五合",
+    "stem_clash": "天干相冲",
+    "stem_control": "天干相克",
+    "six_combination": "六合",
+    "three_combination": "三合",
+    "half_combination": "半合",
+    "three_meeting": "三会",
+    "half_meeting": "半会",
+    "clash": "六冲",
+    "harm": "六害",
+    "break": "相破",
+    "punishment": "相刑",
+    "punishment_trigger": "两支刑触发",
+    "hidden_combination": "暗合候选",
+    "arching_combination": "拱合候选",
+    "arching_meeting": "拱会候选",
+    "covering": "盖头",
+    "cut_foot": "截脚",
+    "fuyin": "伏吟（同柱）",
+    "stem_repeat": "天干同现",
+    "branch_repeat": "地支同现",
+    "fanyin": "反吟候选",
+    "heaven_controls_earth_clashes": "天克地冲",
+    "four_tombs_earth_structure": "四库齐全（土局候选）",
+    "competing_combination": "争合/妒合候选",
+}
+_ELEMENT_LABELS = {
+    "wood": "木",
+    "fire": "火",
+    "earth": "土",
+    "metal": "金",
+    "water": "水",
+    "wood_controls_earth": "木克土",
+    "earth_controls_water": "土克水",
+    "water_controls_fire": "水克火",
+    "fire_controls_metal": "火克金",
+    "metal_controls_wood": "金克木",
+}
+
+
+def _enriched_details(result: ChartResult) -> dict[str, object]:
+    """Return API details with the authoritative v2 神煞 result attached.
+
+    Calendar adapters remain focused on calendar-library values. This mapper
+    overlays the versioned project rule engine so every public API consumer,
+    including the LLM pipeline, sees the same per-pillar names and provenance.
+    """
+    details = dict(result.details)
+    raw_basic = details.get("basic")
+    basic = raw_basic if isinstance(raw_basic, dict) else {}
+    profile = load_profile()
+    hits = evaluate_shensha(
+        result.pillars,
+        gender=str(basic.get("gender", "unspecified")),
+        rule_profile=cast(ShenshaRuleProfile, profile.shensha_rule_profile),
+    )
+    raw_pillars = details.get("pillars")
+    enriched_pillars: list[dict[str, object]] = []
+    if isinstance(raw_pillars, list):
+        for raw in raw_pillars:
+            if not isinstance(raw, dict):
+                continue
+            item = dict(cast(dict[str, object], raw))
+            position = str(item.get("position", ""))
+            item["shensha"] = [hit.name for hit in hits if hit.target_position == position]
+            enriched_pillars.append(item)
+    details["pillars"] = enriched_pillars
+    details["shensha"] = [
+        {
+            "name": hit.name,
+            "target": hit.target,
+            "target_position": hit.target_position,
+            "anchor": hit.anchor,
+            "reference": hit.reference,
+            "rule_id": hit.rule_id,
+            "rule_version": hit.rule_version,
+            "source_title": hit.source_title,
+            "source_locator": hit.source_locator,
+            "anchor_position": hit.anchor_position,
+            "variant": hit.variant,
+        }
+        for hit in hits
+    ]
+    return details
 
 
 def to_chart_result_dto(result: ChartResult) -> ChartResultDTO:
@@ -46,6 +133,7 @@ def to_chart_result_dto(result: ChartResult) -> ChartResultDTO:
                 {"engine": e.engine, "version": e.version, "took_ms": e.took_ms}
                 for e in result.engine_versions
             ],
+            "deterministic_details": _enriched_details(result),
         },
         pillars=pillars,
         day_master=result.day_master,
@@ -71,23 +159,64 @@ def to_chart_result_dto(result: ChartResult) -> ChartResultDTO:
     )
 
 
+def _detail_pillars(details: dict[str, object]) -> dict[str, dict[str, Any]]:
+    raw = details.get("pillars")
+    if not isinstance(raw, list):
+        return {}
+    return {
+        str(item.get("position")): cast(dict[str, Any], item)
+        for item in raw
+        if isinstance(item, dict) and item.get("position")
+    }
+
+
 def to_chart_overview_view_dto(result: ChartResult) -> ChartOverviewViewDTO:
     fact_ids_by_value: dict[str, list[str]] = {}
     for fact in result.facts:
         fact_ids_by_value.setdefault(str(fact.value), []).append(fact.fact_id)
-    pillars = [
-        PillarViewDTO(
-            position=p["position"],
-            stem=p["stem"],
-            branch=p["branch"],
-            ten_god=p.get("ten_god_of_stem"),
-            hidden_stems=p.get("hidden_stems") or [],
-            nayin=p.get("nayin"),
-            growth_stage=None,
-            fact_ids=fact_ids_by_value.get(p["ganzhi"], []),
+    details = _enriched_details(result)
+    detail_by_position = _detail_pillars(details)
+    pillars = []
+    for p in result.pillar_dicts():
+        detail = detail_by_position.get(str(p["position"]), {})
+        pillars.append(
+            PillarViewDTO(
+                position=p["position"],
+                stem=p["stem"],
+                branch=p["branch"],
+                ten_god=str(detail.get("major_star") or p.get("ten_god_of_stem") or "") or None,
+                hidden_stems=cast(
+                    list[dict[str, Any]],
+                    detail.get("hidden_stems") or p.get("hidden_stems") or [],
+                ),
+                nayin=str(detail.get("nayin") or p.get("nayin") or "") or None,
+                growth_stage=str(detail.get("growth_stage") or "") or None,
+                fact_ids=fact_ids_by_value.get(p["ganzhi"], []),
+            )
         )
-        for p in result.pillar_dicts()
+    relationships = [
+        {
+            "type": relation.type,
+            "label": _RELATION_LABELS.get(relation.type, relation.type),
+            "participants": list(relation.branches),
+            "element": _ELEMENT_LABELS.get(relation.element or "", relation.element),
+            "rule_id": relation.rule_id,
+            "positions": list(relation.positions),
+            "direction": relation.direction,
+            "basis": list(relation.basis),
+            "variant": relation.variant,
+        }
+        for relation in evaluate_relations(
+            result.pillars,
+            rule_profile=cast(RuleProfile, load_profile().relation_rule_profile),
+        )
     ]
+    five_elements_raw = details.get("five_elements")
+    five_elements = (
+        cast(list[dict[str, Any]], five_elements_raw)
+        if isinstance(five_elements_raw, list)
+        else []
+    )
     return ChartOverviewViewDTO(
         chart_id=result.chart_id,
         display_name="命盘",
@@ -100,6 +229,6 @@ def to_chart_overview_view_dto(result: ChartResult) -> ChartOverviewViewDTO:
             {"label": "时间口径", "value": result.time_basis},
         ],
         warnings=[{"severity": item.severity, "message": item.message} for item in result.warnings],
-        relationships=[],
-        five_elements=[],
+        relationships=relationships,
+        five_elements=five_elements,
     )

@@ -1,29 +1,84 @@
-"""Chart service — orchestrates the B1/B2 calculation with storage and time normalization.
+"""Chart service — orchestrates deterministic calculation with storage and time normalization.
 
 This is the single point where a BirthRequest becomes a StoredChart. All API
-routes for `/v1/charts` go through here. RAG/LLM never call this; they only
-read stored charts.
+routes for `/v1/charts` go through here. RAG/LLM only read stored chart facts.
 """
 from __future__ import annotations
 
 import logging
 import uuid
-from typing import cast
+from dataclasses import replace
+from datetime import date
 
-from ..adapters.storage import ChartStore, InMemoryChartStore
+from ..adapters.storage import ChartStore, InMemoryChartStore, SQLiteChartStore
 from ..adapters.time import normalize
 from ..api.dto import BirthRequest, ChartResultDTO, TemporalContextViewDTO
 from ..domain.chart import ChartResult
 from ..domain.errors import InvalidInputError, ProfileError
-from ..domain.pillars import Branch, Pillar, Stem
 from ..domain.profile import CalculationProfile, load_profile
-from ..domain.rules import compute_liuyun
-from ..domain.rules.qiyun_dayun import DayunPeriod
+from ..domain.rules.temporal import build_temporal_context, compute_exact_yun
 from ..domain.time import NormalizedTime
 from .calculate_chart import CalculationDeps, calculate_chart_from_normalized, default_deps
 from .viewmodel_mapper import to_chart_result_dto
 
 logger = logging.getLogger(__name__)
+
+_KUA = {
+    1: ("坎卦", "东四命"),
+    2: ("坤卦", "西四命"),
+    3: ("震卦", "东四命"),
+    4: ("巽卦", "东四命"),
+    6: ("乾卦", "西四命"),
+    7: ("兑卦", "西四命"),
+    8: ("艮卦", "西四命"),
+    9: ("离卦", "东四命"),
+}
+
+
+def _digit_root(value: int) -> int:
+    result = abs(value)
+    while result > 9:
+        result = sum(int(char) for char in str(result))
+    return result or 9
+
+
+def _kua_number(year: int, gender: str) -> int:
+    seed = _digit_root(year % 100)
+    if year >= 2000:
+        number = _digit_root(9 - seed) if gender == "male" else _digit_root(seed + 6)
+    else:
+        number = _digit_root(10 - seed) if gender == "male" else _digit_root(seed + 5)
+    if number == 5:
+        return 2 if gender == "male" else 8
+    return number
+
+
+def _ming_gua(year: int, gender: str) -> str:
+    def label(resolved_gender: str) -> str:
+        name, group = _KUA[_kua_number(year, resolved_gender)]
+        return f"{name}（{group}）"
+
+    if gender in {"male", "female"}:
+        return label(gender)
+    return f"男命：{label('male')}；女命：{label('female')}"
+
+
+def _with_exact_yun(chart: ChartResult) -> ChartResult:
+    """Upgrade persisted v1 rounded Yun data on read without a destructive migration."""
+    qiyun = chart.qiyun or {}
+    if qiyun.get("rule_id") == "QIYUN-LUNAR-PYTHON-SECT2-V2":
+        return chart
+    raw_basic = chart.details.get("basic")
+    basic = raw_basic if isinstance(raw_basic, dict) else {}
+    gender = str(basic.get("gender", "unspecified"))
+    try:
+        exact_qiyun, exact_dayun = compute_exact_yun(chart.calculation_time, gender=gender)
+    except (TypeError, ValueError):
+        return chart
+    reference = qiyun.get("reference_jie_utc")
+    if reference:
+        exact_qiyun["reference_jie_utc"] = reference
+    return replace(chart, qiyun=exact_qiyun, dayun=tuple(exact_dayun))
 
 
 class ChartService:
@@ -43,14 +98,13 @@ class ChartService:
         idempotency_key: str,
         chart_id: str | None = None,
         profile: CalculationProfile | None = None,
+        owner_id: str = "anonymous",
     ) -> tuple[ChartResultDTO, str, bool]:
         """Idempotent create. Returns (dto, chart_id, created_now)."""
-        # Idempotency: return existing chart if the key was used before.
         existing = self.store.find_by_idempotency_key(idempotency_key)
         if existing:
-            return to_chart_result_dto(existing.chart), existing.chart_id, False
+            return to_chart_result_dto(_with_exact_yun(existing.chart)), existing.chart_id, False
 
-        # Validate profile_id
         profile = profile or load_profile()
         if request.calculation_profile_id != profile.profile_id:
             raise ProfileError(
@@ -58,36 +112,55 @@ class ChartService:
                 safe_details={"active": profile.profile_id, "requested": request.calculation_profile_id},
             )
 
-        # Normalize time → UTC for deterministic calculation
         nt = self._normalize_time(request, profile)
-
-        # Run deterministic calculation
         chart_id = chart_id or f"chart_{uuid.uuid4().hex[:12]}"
-        result: ChartResult = calculate_chart_from_normalized(
+        calculated = calculate_chart_from_normalized(
             nt=nt,
             profile=profile,
             deps=self.deps,
             chart_id=chart_id,
             gender=request.gender,
         )
-        # Override the result's chart_id in case calculate generated a new one
+
+        details = dict(calculated.details)
+        basic_source = details.get("basic")
+        basic = dict(basic_source) if isinstance(basic_source, dict) else {}
+        basic.update(
+            {
+                "gender": request.gender,
+                "birth_datetime_local": request.birth_datetime_local.isoformat(),
+                "timezone": request.timezone,
+                "time_precision": request.time_precision,
+                "time_basis": calculated.time_basis,
+                "civil_time": nt.local_civil.isoformat(),
+                "local_mean_solar_time": (
+                    nt.local_mean_solar.isoformat() if nt.local_mean_solar is not None else None
+                ),
+                "true_solar_time": nt.true_solar.isoformat() if nt.true_solar is not None else None,
+                "calculation_time": calculated.calculation_time.isoformat(),
+                "birthplace": request.birthplace.model_dump(exclude_none=True),
+                "ming_gua": _ming_gua(request.birth_datetime_local.year, request.gender),
+            }
+        )
+        details["basic"] = basic
+
         result = ChartResult(
             chart_id=chart_id,
-            calculation_status=result.calculation_status,
-            calculation_profile_id=result.calculation_profile_id,
-            normalized_utc=result.normalized_utc,
-            calculation_time=result.calculation_time,
-            time_basis=result.time_basis,
-            pillars=result.pillars,
-            facts=result.facts,
-            engine_versions=result.engine_versions,
-            warnings=result.warnings,
-            qiyun=result.qiyun,
-            dayun=result.dayun,
+            calculation_status=calculated.calculation_status,
+            calculation_profile_id=calculated.calculation_profile_id,
+            normalized_utc=calculated.normalized_utc,
+            calculation_time=calculated.calculation_time,
+            time_basis=calculated.time_basis,
+            pillars=calculated.pillars,
+            facts=calculated.facts,
+            engine_versions=calculated.engine_versions,
+            warnings=calculated.warnings,
+            qiyun=calculated.qiyun,
+            dayun=calculated.dayun,
+            details=details,
         )
 
-        # Persist
-        self.store.save(result)
+        self.store.save(result, owner_id=owner_id)
         self.store.remember_idempotency_key(idempotency_key, chart_id)
         return to_chart_result_dto(result), chart_id, True
 
@@ -95,10 +168,10 @@ class ChartService:
         stored = self.store.get(chart_id)
         if not stored or stored.deleted:
             raise InvalidInputError(f"chart not found: {chart_id}")
-        return to_chart_result_dto(stored.chart)
+        return to_chart_result_dto(_with_exact_yun(stored.chart))
 
-    def list_charts(self) -> list[str]:
-        return [s.chart_id for s in self.store.list_for_owner("anonymous")]
+    def list_charts(self, owner_id: str = "anonymous") -> list[str]:
+        return [s.chart_id for s in self.store.list_for_owner(owner_id)]
 
     def delete_chart(self, chart_id: str) -> bool:
         return self.store.delete(chart_id)
@@ -107,7 +180,7 @@ class ChartService:
         stored = self.store.get(chart_id)
         if not stored or stored.deleted:
             raise InvalidInputError(f"chart not found: {chart_id}")
-        return stored.chart
+        return _with_exact_yun(stored.chart)
 
     def set_note(self, chart_id: str, note: str) -> None:
         if len(note) > 500:
@@ -115,72 +188,62 @@ class ChartService:
         if self.store.set_note(chart_id, note) is None:
             raise InvalidInputError("chart not found")
 
-    def get_temporal_context(self, chart_id: str, target_year: int) -> TemporalContextViewDTO:
+    def get_temporal_context(
+        self,
+        chart_id: str,
+        target_year: int,
+        target_date: date | None = None,
+    ) -> TemporalContextViewDTO:
         if target_year < 1900 or target_year > 2200:
             raise InvalidInputError("target year is outside the supported range")
+        if target_date is not None and target_date.year != target_year:
+            raise InvalidInputError("target_date must fall inside target_year")
         chart = self.get_chart_result(chart_id)
-        if chart.calculation_status != "passed" or not chart.qiyun or not chart.dayun:
-            raise InvalidInputError("temporal context requires a validated chart with dayun")
-        periods = tuple(
-            DayunPeriod(
-                index=int(cast(str | int, item["index"])),
-                start_age=int(cast(str | int, item["start_age"])),
-                end_age=int(cast(str | int, item["end_age"])),
-                ganzhi=str(item["ganzhi"]),
-                pillar=Pillar(Stem(str(item["ganzhi"])[0]), Branch(str(item["ganzhi"])[1])),
+        if chart.calculation_status != "passed":
+            raise InvalidInputError("temporal context requires a validated chart")
+        basic_source = chart.details.get("basic")
+        basic = basic_source if isinstance(basic_source, dict) else {}
+        gender = str(basic.get("gender", "unspecified"))
+        try:
+            context = build_temporal_context(
+                chart.pillars,
+                chart.calculation_time,
+                gender=gender,
+                target_year=target_year,
+                target_date=target_date,
             )
-            for item in chart.dayun
-        )
-        context = compute_liuyun(
-            natal=chart.pillars,
-            qiyun_start_age_years=int(cast(str | int, chart.qiyun["start_age_years"])),
-            dayun_periods=periods,
-            target_year=target_year,
-            birth_year=chart.normalized_utc.year,
-        )
-        active = next(
-            (item for item in chart.dayun if context.active_dayun and item["index"] == context.active_dayun.index),
-            None,
-        )
-        year_fact_id = f"LIUNIAN-{target_year}"
-        year = {
-            "ganzhi": context.year_pillar.ganzhi,
-            "stem": context.year_pillar.stem.char,
-            "branch": context.year_pillar.branch.char,
-            "fact_id": year_fact_id,
-            "rule_id": "LIUNIAN-CALENDAR-V1",
-        }
-        months = [
-            {
-                "index": index,
-                "label": f"节气月 {index}",
-                "ganzhi": pillar.ganzhi,
-                "stem": pillar.stem.char,
-                "branch": pillar.branch.char,
-                "fact_id": f"LIUYUE-{target_year}-{index:02d}",
-                "rule_id": "LIUYUE-JIEQI-V1",
-            }
-            for index, pillar in enumerate(context.month_pillars, start=1)
-        ]
+        except (TypeError, ValueError) as exc:
+            raise InvalidInputError(
+                "unable to calculate exact temporal context",
+                safe_details={"reason": str(exc)},
+            ) from exc
+        active = context.get("active_dayun")
+        active_ganzhi = active.get("ganzhi") if isinstance(active, dict) else None
+        year = context["year"]
+        assert isinstance(year, dict)
         breadcrumb = [
             {"level": "natal", "label": "原局", "ganzhi": chart.pillars.day.ganzhi},
-            {"level": "dayun", "label": "大运", "ganzhi": active["ganzhi"] if active else None},
-            {"level": "year", "label": "流年", "ganzhi": context.year_pillar.ganzhi},
+            {"level": "dayun", "label": "大运", "ganzhi": active_ganzhi},
+            {"level": "year", "label": "流年", "ganzhi": year.get("ganzhi")},
         ]
         return TemporalContextViewDTO(
             chart_id=chart_id,
             target_year=target_year,
             breadcrumb=breadcrumb,
-            active_dayun=active,
+            qiyun=context.get("qiyun"),
+            dayuns=context.get("dayuns", []),
+            active_dayun=active if isinstance(active, dict) else None,
             year=year,
-            months=months,
+            months=context.get("months", []),
+            selected_month=context.get("selected_month"),
+            selected_day=context.get("selected_day"),
+            interactions=context.get("interactions", []),
+            interaction_summary=context.get("interaction_summary", {}),
+            seasonal_strength=context.get("seasonal_strength", {}),
         )
 
     @staticmethod
     def _normalize_time(request: BirthRequest, profile: CalculationProfile) -> NormalizedTime:
-        # If the request's birth_datetime_local is naive, attach the requested
-        # timezone before normalizing. (The schema accepts both naive + IANA
-        # name and offset-aware; we collapse to the latter before normalize().)
         from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
         from ..domain.errors import TimeError
@@ -189,11 +252,11 @@ class ChartService:
         if local_dt.tzinfo is None:
             try:
                 tz = ZoneInfo(request.timezone)
-            except ZoneInfoNotFoundError as e:
+            except ZoneInfoNotFoundError as exc:
                 raise TimeError(
                     f"unknown timezone: {request.timezone}",
                     safe_details={"hint": "use IANA name like Asia/Shanghai"},
-                ) from e
+                ) from exc
             local_dt = local_dt.replace(tzinfo=tz)
         return normalize(
             local_dt=local_dt,
@@ -204,7 +267,7 @@ class ChartService:
         )
 
 
-_DEFAULT_SERVICE = ChartService()
+_DEFAULT_SERVICE = ChartService(store=SQLiteChartStore())
 
 
 def get_default_service() -> ChartService:

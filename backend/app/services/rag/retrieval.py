@@ -24,6 +24,13 @@ def _cosine(left: Counter[str], right: Counter[str]) -> float:
     return numerator / (left_norm * right_norm) if left_norm and right_norm else 0.0
 
 
+def _task_matches(plan_task: str | None, chunk_task: str) -> bool:
+    # "interpretation" is the umbrella professional-analysis task.  It must be
+    # able to retrieve approved rule, pattern and explanation chunks; narrower
+    # task names remain strict filters.
+    return plan_task in (None, "interpretation") or chunk_task == plan_task
+
+
 class HybridRetriever:
     def __init__(self, chunks: Iterable[RagChunk]) -> None:
         chunks = tuple(chunks)
@@ -36,14 +43,20 @@ class HybridRetriever:
             chunk
             for chunk in self._chunks
             if (plan.school is None or chunk.school == plan.school)
-            and (plan.task_type is None or chunk.task_type == plan.task_type)
+            and _task_matches(plan.task_type, chunk.task_type)
             and (not plan.languages or chunk.language in plan.languages)
         ]
         query_tokens = Counter(_tokens(" ".join(plan.queries)))
         keyword_scores: dict[str, float] = {}
         vector_scores: dict[str, float] = {}
         for chunk in candidates:
-            doc_tokens = Counter(_tokens(chunk.content_normalized + " " + str(chunk.metadata.get("title", ""))))
+            doc_tokens = Counter(
+                _tokens(
+                    chunk.content_normalized
+                    + " "
+                    + str(chunk.metadata.get("title", ""))
+                )
+            )
             keyword_scores[chunk.chunk_id] = sum(
                 min(count, doc_tokens[token]) for token, count in query_tokens.items()
             )
@@ -55,7 +68,9 @@ class HybridRetriever:
         for chunk in candidates:
             if keyword_scores[chunk.chunk_id] <= 0 and vector_scores[chunk.chunk_id] <= 0:
                 continue
-            score = 1 / (60 + keyword_rank[chunk.chunk_id]) + 1 / (60 + vector_rank[chunk.chunk_id])
+            score = 1 / (60 + keyword_rank[chunk.chunk_id]) + 1 / (
+                60 + vector_rank[chunk.chunk_id]
+            )
             fused.append((score, chunk))
         fused.sort(key=lambda item: (-item[0], item[1].chunk_id))
 
@@ -89,4 +104,3 @@ class HybridRetriever:
     def _rank(scores: dict[str, float]) -> dict[str, int]:
         ordered = sorted(scores, key=lambda key: (-scores[key], key))
         return {key: index + 1 for index, key in enumerate(ordered)}
-

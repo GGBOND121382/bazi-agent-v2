@@ -8,6 +8,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Header, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from ...auth import CurrentUser, require_user
 from ...domain.errors import InvalidInputError
 from ...domain.profile import load_profile
 from ...jobs import AnalysisJobService, JobStateError, get_default_analysis_service
@@ -35,9 +36,21 @@ class PreferencesPatch(BaseModel):
     reduce_motion: bool | None = None
 
 
-_preferences = UserPreferencesDTO(
+_DEFAULT_PREFERENCES = UserPreferencesDTO(
     language="zh-CN", detail_level="concise", theme="system", reduce_motion=False
 )
+
+
+def _authorize_report(report_id: str, user: CurrentUser) -> None:
+    from ...persistence import connect
+    with connect() as conn:
+        row = conn.execute(
+            """SELECT c.owner_id FROM reports r JOIN charts c ON c.chart_id=r.chart_id
+            WHERE r.report_id=?""",
+            (report_id,),
+        ).fetchone()
+    if row is None or (not user.is_admin and str(row["owner_id"]) != user.user_id):
+        raise InvalidInputError("report not found")
 
 
 def _jobs() -> AnalysisJobService:
@@ -48,19 +61,50 @@ def _charts() -> ChartService:
     return get_default_service()
 
 
+def _birth_date_from_basic(basic: dict[str, Any]) -> str | None:
+    for key in ("birth_datetime_local", "solar_datetime", "civil_time"):
+        value = basic.get(key)
+        if isinstance(value, str) and len(value) >= 10:
+            return value[:10]
+    return None
+
+
+def _city_from_basic(basic: dict[str, Any]) -> str | None:
+    birthplace = basic.get("birthplace")
+    if not isinstance(birthplace, dict):
+        return None
+    for key in ("city", "province"):
+        value = birthplace.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 @router.get("/history")
 def history(
-    charts: ChartService = Depends(_charts), jobs: AnalysisJobService = Depends(_jobs)
+    charts: ChartService = Depends(_charts),
+    jobs: AnalysisJobService = Depends(_jobs),
+    user: CurrentUser = Depends(require_user),
 ) -> dict[str, Any]:
-    chart_items = [
-        {
-            "chart_id": item.chart_id,
-            "calculation_status": item.calculation_status,
-            "created_at": item.created_at.isoformat(),
-            "note": item.note,
-        }
-        for item in charts.store.list_for_owner("anonymous")
-    ]
+    chart_items: list[dict[str, Any]] = []
+    for item in charts.store.list_for_owner("*" if user.is_admin else user.user_id):
+        basic_source = item.chart.details.get("basic")
+        basic = basic_source if isinstance(basic_source, dict) else {}
+        gender_value = basic.get("gender")
+        gender = gender_value if gender_value in {"male", "female"} else None
+        chart_items.append(
+            {
+                "chart_id": item.chart_id,
+                "calculation_status": item.calculation_status,
+                "created_at": item.created_at.isoformat(),
+                "note": item.note,
+                "gender": gender,
+                "birth_date": _birth_date_from_basic(basic),
+                "city": _city_from_basic(basic),
+            }
+        )
+
+    allowed_chart_ids = {item["chart_id"] for item in chart_items}
     report_items = [
         {
             "report_id": item["report_id"],
@@ -69,14 +113,21 @@ def history(
             "generated_at": item["generated_at"],
         }
         for item in jobs.store.list_reports()
+        if item["chart_id"] in allowed_chart_ids
     ]
     return {"charts": chart_items, "reports": report_items}
 
 
 @router.patch("/charts/{chart_id}/note", status_code=status.HTTP_204_NO_CONTENT)
 def set_chart_note(
-    chart_id: str, request: NoteRequest, charts: ChartService = Depends(_charts)
+    chart_id: str,
+    request: NoteRequest,
+    charts: ChartService = Depends(_charts),
+    user: CurrentUser = Depends(require_user),
 ) -> None:
+    stored = charts.store.get(chart_id)
+    if stored is None or (not user.is_admin and stored.owner_id != user.user_id):
+        raise InvalidInputError("chart not found")
     charts.set_note(chart_id, request.note)
 
 
@@ -85,7 +136,9 @@ def create_export(
     report_id: str,
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
     jobs: AnalysisJobService = Depends(_jobs),
+    user: CurrentUser = Depends(require_user),
 ) -> dict[str, str]:
+    _authorize_report(report_id, user)
     if jobs.store.get_report(report_id) is None:
         raise InvalidInputError("report not found")
     return {
@@ -97,8 +150,12 @@ def create_export(
 
 @router.post("/reports/{report_id}/shares", status_code=status.HTTP_201_CREATED)
 def create_share(
-    report_id: str, request: ShareRequest, jobs: AnalysisJobService = Depends(_jobs)
+    report_id: str,
+    request: ShareRequest,
+    jobs: AnalysisJobService = Depends(_jobs),
+    user: CurrentUser = Depends(require_user),
 ) -> dict[str, Any]:
+    _authorize_report(report_id, user)
     if os.environ.get("ENABLE_REPORT_SHARING", "false").casefold() != "true":
         raise InvalidInputError("report sharing is disabled")
     expires_at = datetime.now(UTC) + timedelta(hours=request.expires_in_hours)
@@ -114,7 +171,15 @@ def create_share(
 
 
 @router.delete("/shares/{share_id}", status_code=status.HTTP_204_NO_CONTENT)
-def revoke_share(share_id: str, jobs: AnalysisJobService = Depends(_jobs)) -> None:
+def revoke_share(
+    share_id: str,
+    jobs: AnalysisJobService = Depends(_jobs),
+    user: CurrentUser = Depends(require_user),
+) -> None:
+    record = jobs.store.get_share(share_id)
+    if record is None:
+        raise InvalidInputError("share not found")
+    _authorize_report(record.report_id, user)
     try:
         jobs.store.revoke_share(share_id)
     except JobStateError as exc:
@@ -122,24 +187,41 @@ def revoke_share(share_id: str, jobs: AnalysisJobService = Depends(_jobs)) -> No
 
 
 @router.get("/settings/profile", response_model=UserPreferencesDTO)
-def get_preferences() -> UserPreferencesDTO:
-    return _preferences
+def get_preferences(user: CurrentUser = Depends(require_user)) -> UserPreferencesDTO:
+    from ...persistence import connect
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT preference_json FROM user_preferences WHERE user_id=?",
+            (user.user_id,),
+        ).fetchone()
+    if row is None:
+        return _DEFAULT_PREFERENCES
+    return UserPreferencesDTO.model_validate_json(str(row["preference_json"]))
 
 
 @router.patch("/settings/profile", response_model=UserPreferencesDTO)
-def update_preferences(request: PreferencesPatch) -> UserPreferencesDTO:
-    global _preferences
-    current = _preferences.model_dump()
+def update_preferences(
+    request: PreferencesPatch, user: CurrentUser = Depends(require_user)
+) -> UserPreferencesDTO:
+    from ...persistence import connect
+    current = get_preferences(user).model_dump()
     current.update(request.model_dump(exclude_none=True))
     try:
-        _preferences = UserPreferencesDTO.model_validate(current)
+        updated = UserPreferencesDTO.model_validate(current)
     except ValueError as exc:
         raise InvalidInputError("invalid preference value") from exc
-    return _preferences
+    with connect() as conn:
+        conn.execute(
+            """INSERT INTO user_preferences(user_id, preference_json) VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET preference_json=excluded.preference_json""",
+            (user.user_id, updated.model_dump_json()),
+        )
+    return updated
 
 
 @router.get("/settings/configuration")
-def get_configuration() -> dict[str, Any]:
+def get_configuration(user: CurrentUser = Depends(require_user)) -> dict[str, Any]:
+    del user
     profile = load_profile()
     return {
         "calculation_profile_id": profile.profile_id,

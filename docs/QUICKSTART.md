@@ -237,10 +237,26 @@ $env:BAZI_RAG_DATASET_DIR = 'D:\your-path\bazi_rag_dataset_v2_1'
 
 ### 重启后历史记录消失
 
-这是当前版本的已知边界。`ChartStore` 和分析任务存储仍是进程内实现，重启后端会清空本次运行的数据；多实例部署前需要替换为 PostgreSQL 和对象存储。
+当前本地玩具版使用仓库根目录 `runtime/bazi_agent.db` 持久化用户、命盘、任务、报告和对话，重启后不会清空；Prompt 与模型调用轨迹同时写入数据库和 `runtime/logs/llm_calls.jsonl`。若未来需要多实例部署，再替换为 PostgreSQL、独立任务队列和对象存储。
 
 ### 安全与用途边界
 
 - 传统命理解释仅作文化研究与辅助阅读，不构成医疗、投资或法律建议。
 - C 级解释和历史案例不能作为通用规则或必然预测。
 - 后端不会输出模型内部思维链；只有通过确定性验证的 claim 才能进入报告。
+
+## DeepSeek 流式与超时配置
+
+可在仓库根目录 `config.local.env` 中设置：
+
+```env
+DEEPSEEK_MODEL=deepseek-v4-pro
+DEEPSEEK_THINKING=enabled
+DEEPSEEK_REASONING_EFFORT=high
+DEEPSEEK_STREAM_IDLE_TIMEOUT=90
+DEEPSEEK_TOTAL_TIMEOUT=600
+DEEPSEEK_MAX_TOKENS=65536
+DEEPSEEK_MAX_TRANSPORT_ATTEMPTS=2
+```
+
+完整报告采用单次整体流式调用。页面在 55% 之后会依据模型流式 chunk 更新子阶段；若传输中断会自动重试一次。局部校验失败时只修复目标字段，不会默认重新生成整份报告。

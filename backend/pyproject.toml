@@ -16,7 +16,7 @@ dependencies = [
     "jsonschema>=4.22",
     "PyYAML>=6.0",
     "lunar-python>=1.4.0",
-    "sxtwl>=1.1",
+    "sxtwl>=1.1; platform_system != 'Windows'",
     "sqlalchemy>=2.0",
     "alembic>=1.13",
     "psycopg[binary]>=3.2",
@@ -38,6 +38,9 @@ dev = [
     "types-PyYAML",
     "freezegun>=1.5",
     "respx>=0.21",
+]
+calendar-crosscheck = [
+    "sxtwl>=1.1",
 ]
 
 [tool.setuptools.packages.find]

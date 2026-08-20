@@ -1,21 +1,7 @@
-/**
- * Hand-mirrored TS types corresponding to contracts/schemas/json_schema/*.json
- * and contracts/openapi.yaml.
- *
- * If the schema files change, regenerate this file by running:
- *     npm run gen:api
- * (requires openapi-typescript + a reachable contracts/openapi.yaml).
- *
- * Until then, keep this file in sync with the schemas by hand. Contract
- * tests in backend assert the equivalent Pydantic models accept the same
- * JSON, so a frontend bug will surface as a runtime validation error, not a
- * silent shape mismatch.
- */
-
 export type BirthRequest = {
   schema_version: 'birth-request-v1'
   gender: 'male' | 'female' | 'unspecified'
-  birth_datetime_local: string // ISO 8601
+  birth_datetime_local: string
   timezone: string
   fold?: 0 | 1
   birthplace: {
@@ -62,13 +48,37 @@ export type WarningDTO = {
   message: string
 }
 
+export type DeterministicPillarDetail = {
+  position: 'year' | 'month' | 'day' | 'hour'
+  ganzhi: string
+  stem: string
+  branch: string
+  major_star?: string
+  hidden_stems?: { stem: string; ten_god?: string }[]
+  secondary_stars?: string[]
+  growth_stage?: string
+  self_seat?: string
+  void?: string
+  nayin?: string
+  five_elements?: string
+  shensha?: string[]
+}
+
+export type DeterministicDetails = {
+  basic?: Record<string, unknown>
+  pillars?: DeterministicPillarDetail[]
+  five_elements?: { element: string; explicit: number; hidden: number; total?: number }[]
+  shensha?: Record<string, unknown>[]
+  [key: string]: unknown
+}
+
 export type ChartResultDTO = {
   schema_version: 'chart-result-v1'
   chart_id: string
   calculation_status: 'passed' | 'needs_review' | 'ambiguous' | 'failed'
   calculation_profile_id: string
-  normalized_time: { utc?: string }
-  calendar: { engine_versions?: EngineVersionDTO[] }
+  normalized_time: { utc?: string; calculation_time?: string; time_basis?: string }
+  calendar: { engine_versions?: EngineVersionDTO[]; deterministic_details?: DeterministicDetails }
   pillars: PillarDTO[]
   day_master: string
   facts: FactDTO[]
@@ -98,8 +108,18 @@ export type ChartOverviewViewDTO = {
   pillars: PillarViewDTO[]
   assumptions: { label: string; value: string }[]
   warnings: { severity: string; message: string }[]
-  relationships: { type: string; label: string; participants: string[]; rule_id: string }[]
-  five_elements?: { element: string; explicit: number; hidden: number }[]
+  relationships: {
+    type: string
+    label: string
+    participants: string[]
+    rule_id: string
+    element?: string | null
+    positions?: string[]
+    direction?: string | null
+    basis?: string[]
+    variant?: string
+  }[]
+  five_elements?: { element: string; explicit: number; hidden: number; total?: number }[]
 }
 
 export type JobEventDTO = {
@@ -137,6 +157,38 @@ export type AnalysisJobDTO = {
   error_code?: string | null
 }
 
+export type ChatScope = 'general' | 'dayun' | 'lifecycle' | 'year' | 'month' | 'day'
+export type ChatTurnDTO = { role: 'user' | 'assistant'; content: string }
+export type FortuneChatRequestDTO = {
+  question: string
+  scope: ChatScope
+  target_date: string
+  history?: ChatTurnDTO[]
+  school?: string
+  thread_id?: string
+  target_dayun_index?: number
+}
+export type FortuneChatSectionDTO = {
+  title: string
+  content: string
+  opportunities?: string[]
+  cautions?: string[]
+  timing?: string[]
+}
+export type FortuneChatResponseDTO = {
+  answer: string
+  sections: FortuneChatSectionDTO[]
+  citations: { evidence_id: string; title?: string; source_id?: string; locator?: string }[]
+  scope: ChatScope
+  target_date: string
+  target_dayun_index?: number | null
+  deterministic_context: Record<string, unknown>
+  model_id: string
+  prompt_version: string
+  thread_id: string
+  generation_trace: Record<string, unknown>
+}
+
 export type ApiErrorDTO = {
   schema_version: 'api-error-v1'
   request_id: string
@@ -156,22 +208,111 @@ export type UserPreferencesDTO = {
   default_analysis_topics?: string[]
 }
 
+export type TemporalShenshaDTO = {
+  name: string
+  rule_id: string
+  reference?: string
+  anchor?: string
+  anchor_position?: string | null
+  target?: string
+  source_title?: string
+  source_locator?: string
+  rule_version?: string
+  variant?: string
+}
+
+export type TemporalPillarDetailDTO = {
+  ganzhi: string
+  stem: string
+  branch: string
+  stem_ten_god: string
+  branch_ten_god: string
+  hidden_stems: { stem: string; ten_god: string }[]
+  growth_stage: string
+  self_seat: string
+  xunkong: string
+  nayin: string
+  shensha: TemporalShenshaDTO[]
+  relations: TemporalRelationDTO[]
+  relation_summary?: Record<string, unknown>
+  temporal_interactions?: TemporalRelationDTO[]
+  interaction_summary?: Record<string, unknown>
+}
+
+export type TemporalRelationDTO = {
+  fact_id?: string
+  type: string
+  label: string
+  participants: string[]
+  participant_positions?: { position: string; ganzhi: string; stem?: string; branch?: string }[]
+  natal_position?: string
+  natal_positions?: string[]
+  temporal_positions?: string[]
+  element?: string | null
+  direction?: string | null
+  basis?: string[]
+  rule_id: string
+  attention?: 'contextual' | 'attention' | 'high_attention'
+  requires_interpretation?: boolean
+}
+
+export type TemporalDayunDTO = TemporalPillarDetailDTO & {
+  index: number
+  start_year: number
+  end_year: number
+  start_age: number
+  end_age: number
+  fact_id: string
+  rule_id: string
+}
+
+export type TemporalMonthDTO = TemporalPillarDetailDTO & {
+  index: number
+  label: string
+  jie_name: string
+  start_datetime: string
+  end_datetime: string
+  fact_id: string
+  rule_id: string
+}
+
 export type TemporalContextViewDTO = {
   schema_version: 'temporal-context-view-v1'
   chart_id: string
   target_year: number
   breadcrumb: { level: string; label: string; ganzhi?: string | null }[]
-  active_dayun?: Record<string, unknown> | null
-  year: { ganzhi: string; stem: string; branch: string; fact_id: string; rule_id: string }
-  months: {
-    index: number
-    label: string
-    ganzhi: string
-    stem: string
-    branch: string
+  qiyun?: {
+    direction?: string
+    start_years?: number
+    start_months?: number
+    start_days?: number
+    start_hours?: number
+    start_datetime?: string
+    rule_id?: string
+  } | null
+  dayuns: TemporalDayunDTO[]
+  active_dayun?: TemporalDayunDTO | null
+  year: TemporalPillarDetailDTO & {
+    year: number
+    civil_target_year?: number
+    lichun_year?: number
+    age: number
+    xiaoyun?: string | null
     fact_id: string
     rule_id: string
-  }[]
+  }
+  months: TemporalMonthDTO[]
+  selected_month?: TemporalMonthDTO | null
+  selected_day?: TemporalPillarDetailDTO & {
+    date: string
+    lunar_date: string
+    month_ganzhi: string
+    fact_id: string
+    rule_id: string
+  }
+  interactions: TemporalRelationDTO[]
+  interaction_summary: Record<string, unknown>
+  seasonal_strength: Record<string, string>
 }
 
 export type ReportBlockDTO = {
@@ -210,8 +351,18 @@ export type ReportViewDTO = {
   limitations: string[]
 }
 
+export type HistoryChartDTO = {
+  chart_id: string
+  calculation_status: string
+  created_at: string
+  note: string
+  gender?: 'male' | 'female' | null
+  birth_date?: string | null
+  city?: string | null
+}
+
 export type HistoryDTO = {
-  charts: { chart_id: string; calculation_status: string; created_at: string; note: string }[]
+  charts: HistoryChartDTO[]
   reports: { report_id: string; chart_id: string; title: string; generated_at: string }[]
 }
 
@@ -221,4 +372,37 @@ export type ConfigurationDTO = {
   model_provider: string
   model_configuration_read_only: boolean
   sharing_enabled: boolean
+}
+
+export type CurrentUserDTO = {
+  user_id: string
+  username: string
+  role: 'admin' | 'user'
+  enabled: boolean
+  approval_status: 'pending' | 'approved' | 'rejected'
+  must_change_password: boolean
+  created_at: string
+}
+
+export type ChatThreadSummaryDTO = {
+  thread_id: string
+  chart_id: string
+  title: string
+  scope: ChatScope
+  created_at: string
+  updated_at: string
+}
+
+export type ChatThreadDTO = {
+  thread: ChatThreadSummaryDTO & { owner_id?: string }
+  messages: {
+    role: 'user' | 'assistant'
+    content: string
+    payload?: {
+      sections?: FortuneChatSectionDTO[]
+      citations?: FortuneChatResponseDTO['citations']
+      generation_trace?: Record<string, unknown>
+    } | null
+    created_at: string
+  }[]
 }

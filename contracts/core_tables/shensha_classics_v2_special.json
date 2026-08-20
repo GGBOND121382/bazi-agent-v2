@@ -1,0 +1,467 @@
+{
+  "rules": [
+    {
+      "rule_id": "SHENSHA-SHIEBAI-001",
+      "name": "十恶大败",
+      "reference": "day_pillar",
+      "target_kind": "pillar",
+      "values": [
+        "甲辰",
+        "乙巳",
+        "丙申",
+        "丁亥",
+        "庚辰",
+        "戊戌",
+        "癸亥",
+        "辛巳",
+        "己丑",
+        "壬申"
+      ],
+      "source": {
+        "title": "神煞大全（太乙书局整理）",
+        "locator": "十恶大败",
+        "url": "https://book.taiyi.me/命/神煞大全"
+      }
+    },
+    {
+      "rule_id": "SHENSHA-YINCHAYANGCUO-001",
+      "name": "阴差阳错",
+      "reference": "day_pillar",
+      "target_kind": "pillar",
+      "values": [
+        "丙子",
+        "丁丑",
+        "戊寅",
+        "辛卯",
+        "壬辰",
+        "癸巳",
+        "丙午",
+        "丁未",
+        "戊申",
+        "辛酉",
+        "壬戌",
+        "癸亥"
+      ],
+      "source": {
+        "title": "《三命通会》",
+        "locator": "阴差阳错"
+      }
+    },
+    {
+      "rule_id": "SHENSHA-KUIGANG-001",
+      "name": "魁罡",
+      "reference": "day_pillar",
+      "target_kind": "pillar",
+      "values": [
+        "庚辰",
+        "庚戌",
+        "壬辰",
+        "戊戌"
+      ],
+      "source": {
+        "title": "《三命通会》",
+        "locator": "魁罡"
+      }
+    },
+    {
+      "rule_id": "SHENSHA-BAZHUAN-001",
+      "name": "八专",
+      "reference": "day_pillar",
+      "target_kind": "pillar",
+      "values": [
+        "甲寅",
+        "乙卯",
+        "丁未",
+        "戊戌",
+        "己未",
+        "庚申",
+        "辛酉",
+        "癸丑"
+      ],
+      "source": {
+        "title": "神煞大全（太乙书局整理）",
+        "locator": "八专",
+        "url": "https://book.taiyi.me/命/神煞大全"
+      }
+    },
+    {
+      "rule_id": "SHENSHA-SHILING-001",
+      "name": "十灵日",
+      "reference": "day_pillar",
+      "target_kind": "pillar",
+      "values": [
+        "甲辰",
+        "乙亥",
+        "丙辰",
+        "丁酉",
+        "戊午",
+        "庚戌",
+        "庚寅",
+        "辛亥",
+        "壬寅",
+        "癸未"
+      ],
+      "source": {
+        "title": "神煞大全（太乙书局整理）",
+        "locator": "十灵日",
+        "url": "https://book.taiyi.me/命/神煞大全"
+      }
+    },
+    {
+      "rule_id": "SHENSHA-TIANSHE-001",
+      "name": "天赦",
+      "reference": "seasonal_day_pillar",
+      "target_kind": "pillar",
+      "mapping": {
+        "寅卯辰": [
+          "戊寅"
+        ],
+        "巳午未": [
+          "甲午"
+        ],
+        "申酉戌": [
+          "戊申"
+        ],
+        "亥子丑": [
+          "甲子"
+        ]
+      },
+      "source": {
+        "title": "神煞大全（太乙书局整理）",
+        "locator": "天赦日",
+        "url": "https://book.taiyi.me/命/神煞大全"
+      },
+      "target_positions": [
+        "day"
+      ],
+      "temporal_scopes": [
+        "liuri"
+      ]
+    },
+    {
+      "rule_id": "SHENSHA-KONGWANG-001",
+      "name": "空亡",
+      "reference": "year_or_day_xunkong",
+      "target_kind": "branch",
+      "source": {
+        "title": "神煞大全（太乙书局整理）",
+        "locator": "空亡",
+        "url": "https://book.taiyi.me/命/神煞大全"
+      },
+      "note": "以年柱、日柱所在旬查其余地支；命中仅标记落空位置。"
+    },
+    {
+      "rule_id": "SHENSHA-SANQI-001",
+      "name": "三奇贵人",
+      "reference": "consecutive_stems",
+      "target_kind": "stem_sequence",
+      "values": [
+        "甲戊庚",
+        "乙丙丁",
+        "壬癸辛"
+      ],
+      "source": {
+        "title": "神煞大全（太乙书局整理）",
+        "locator": "三奇贵人",
+        "url": "https://book.taiyi.me/命/神煞大全"
+      },
+      "note": "仅识别相邻三柱顺布组合，不据此单独判断格局高低。"
+    },
+    {
+      "rule_id": "SHENSHA-TIANLUO-001",
+      "name": "天罗",
+      "reference": "year_pillar",
+      "target_kind": "branch",
+      "mapping": {
+        "戊子": [
+          "戌",
+          "亥"
+        ],
+        "己丑": [
+          "戌",
+          "亥"
+        ],
+        "丙寅": [
+          "戌",
+          "亥"
+        ],
+        "丁卯": [
+          "戌",
+          "亥"
+        ],
+        "甲辰": [
+          "戌",
+          "亥"
+        ],
+        "乙巳": [
+          "戌",
+          "亥"
+        ],
+        "戊午": [
+          "戌",
+          "亥"
+        ],
+        "己未": [
+          "戌",
+          "亥"
+        ],
+        "丙申": [
+          "戌",
+          "亥"
+        ],
+        "丁酉": [
+          "戌",
+          "亥"
+        ],
+        "甲戌": [
+          "戌",
+          "亥"
+        ],
+        "乙亥": [
+          "戌",
+          "亥"
+        ]
+      },
+      "source": {
+        "title": "神煞大全（太乙书局整理）",
+        "locator": "天罗、地网",
+        "url": "https://book.taiyi.me/命/神煞大全"
+      },
+      "note": "采用年柱纳音查日支法。",
+      "target_positions": [
+        "day"
+      ],
+      "temporal_scopes": [
+        "liuri"
+      ]
+    },
+    {
+      "rule_id": "SHENSHA-DIWANG-001",
+      "name": "地网",
+      "reference": "year_pillar",
+      "target_kind": "branch",
+      "mapping": {
+        "丙子": [
+          "辰",
+          "巳"
+        ],
+        "丁丑": [
+          "辰",
+          "巳"
+        ],
+        "甲寅": [
+          "辰",
+          "巳"
+        ],
+        "乙卯": [
+          "辰",
+          "巳"
+        ],
+        "壬辰": [
+          "辰",
+          "巳"
+        ],
+        "癸巳": [
+          "辰",
+          "巳"
+        ],
+        "丙午": [
+          "辰",
+          "巳"
+        ],
+        "丁未": [
+          "辰",
+          "巳"
+        ],
+        "甲申": [
+          "辰",
+          "巳"
+        ],
+        "乙酉": [
+          "辰",
+          "巳"
+        ],
+        "壬戌": [
+          "辰",
+          "巳"
+        ],
+        "癸亥": [
+          "辰",
+          "巳"
+        ],
+        "庚子": [
+          "辰",
+          "巳"
+        ],
+        "辛丑": [
+          "辰",
+          "巳"
+        ],
+        "戊寅": [
+          "辰",
+          "巳"
+        ],
+        "己卯": [
+          "辰",
+          "巳"
+        ],
+        "丙辰": [
+          "辰",
+          "巳"
+        ],
+        "丁巳": [
+          "辰",
+          "巳"
+        ],
+        "庚午": [
+          "辰",
+          "巳"
+        ],
+        "辛未": [
+          "辰",
+          "巳"
+        ],
+        "戊申": [
+          "辰",
+          "巳"
+        ],
+        "己酉": [
+          "辰",
+          "巳"
+        ],
+        "丙戌": [
+          "辰",
+          "巳"
+        ],
+        "丁亥": [
+          "辰",
+          "巳"
+        ]
+      },
+      "source": {
+        "title": "神煞大全（太乙书局整理）",
+        "locator": "天罗、地网",
+        "url": "https://book.taiyi.me/命/神煞大全"
+      },
+      "note": "采用年柱纳音查日支法。",
+      "target_positions": [
+        "day"
+      ],
+      "temporal_scopes": [
+        "liuri"
+      ]
+    },
+    {
+      "rule_id": "SHENSHA-SIFEI-001",
+      "name": "四废日",
+      "reference": "seasonal_day_pillar",
+      "target_kind": "pillar",
+      "mapping": {
+        "寅卯辰": [
+          "庚申",
+          "辛酉"
+        ],
+        "巳午未": [
+          "壬子",
+          "癸亥"
+        ],
+        "申酉戌": [
+          "甲寅",
+          "乙卯"
+        ],
+        "亥子丑": [
+          "丙午",
+          "丁巳"
+        ]
+      },
+      "target_positions": [
+        "day"
+      ],
+      "temporal_scopes": [
+        "liuri"
+      ],
+      "source": {
+        "title": "《协纪辨方书》",
+        "locator": "春庚申辛酉，夏壬子癸亥，秋甲寅乙卯，冬丙午丁巳"
+      }
+    },
+    {
+      "rule_id": "SHENSHA-GULUAN-WZ-001",
+      "name": "孤鸾煞",
+      "reference": "day_pillar",
+      "target_kind": "pillar",
+      "values": [
+        "甲寅",
+        "乙巳",
+        "丙午",
+        "丁巳",
+        "戊午",
+        "戊申",
+        "辛亥",
+        "壬子"
+      ],
+      "variant": "问真常用日柱口径",
+      "source": {
+        "title": "《渊海子平》及现代神煞表",
+        "locator": "孤鸾日柱，含壬子"
+      }
+    },
+    {
+      "rule_id": "SHENSHA-JIUCHOU-001",
+      "name": "九丑日",
+      "reference": "day_pillar",
+      "target_kind": "pillar",
+      "values": [
+        "丁酉",
+        "戊子",
+        "戊午",
+        "己卯",
+        "己酉",
+        "辛卯",
+        "辛酉",
+        "壬子",
+        "壬午"
+      ],
+      "source": {
+        "title": "神煞大全（问真兼容口径）",
+        "locator": "九丑：丁酉、戊子、戊午、己卯、己酉、辛卯、辛酉、壬子、壬午；查日柱"
+      },
+      "variant": "wenzhen_compatible_v1"
+    },
+    {
+      "rule_id": "SHENSHA-JINSHEN-WZ-001",
+      "name": "金神",
+      "reference": "day_or_hour_pillar",
+      "target_kind": "pillar",
+      "values": [
+        "乙丑",
+        "己巳",
+        "癸酉"
+      ],
+      "target_positions": [
+        "day",
+        "hour"
+      ],
+      "variant": "wenzhen_compatible_v1",
+      "source": {
+        "title": "《渊海子平》论金神；神煞大全（问真兼容显示）",
+        "locator": "癸酉、己巳、乙丑；兼容口径查日柱或时柱，命中只作结构事实"
+      }
+    },
+    {
+      "rule_id": "SHENSHA-TONGZI-WZ-001",
+      "name": "童子煞",
+      "reference": "tongzi_season_nayin",
+      "target_kind": "branch",
+      "target_positions": [
+        "day",
+        "hour"
+      ],
+      "variant": "wenzhen_compatible_v1",
+      "source": {
+        "title": "神煞大全（问真兼容口径）",
+        "locator": "春秋日时见寅子，冬夏日时见卯未辰；年纳音金木见午卯、水火见酉戌、土见辰巳"
+      }
+    }
+  ]
+}

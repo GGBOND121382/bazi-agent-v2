@@ -1,183 +1,256 @@
 <script setup lang="ts">
-/**
- * Birth info wizard (F2). 4 steps:
- *   1. Identity & gender
- *   2. Birth datetime + timezone
- *   3. Birthplace (city, longitude)
- *   4. Advanced (precision, uncertainty, profile)
- *
- * Submit triggers a POST /v1/charts via BaziClient. On success, route to
- * /charts/:chartId. On failure, surface the api-error envelope inline.
- *
- * Mock-data fast-path: if `VITE_USE_MOCKS=true` we skip the network call
- * and load contracts/examples/chart_overview.mock.json so designers can
- * iterate without a backend.
- */
-import { ref, computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useBaziClient, ApiError, type BirthRequest } from '@/api'
+import { ApiError, useBaziClient, type BirthRequest } from '@/api'
+import { chartMetaKey, userStorageKey } from '@/utils/user-context'
 
 const router = useRouter()
 const client = useBaziClient()
-
 const useMocks = import.meta.env.VITE_USE_MOCKS === 'true'
-
-const step = ref(1)
 const submitting = ref(false)
 const submitError = ref<string | null>(null)
+const showAdvanced = ref(false)
+const draftKey = userStorageKey('draft:birth')
+const currentYear = new Date().getFullYear()
 
 const form = ref({
-  gender: 'unspecified' as BirthRequest['gender'],
-  birthDate: '1990-06-15',
-  birthTime: '12:00',
+  name: '',
+  gender: 'male' as BirthRequest['gender'],
+  birthDate: '1990-01-01',
+  birthTime: '00:00',
   timezone: 'Asia/Shanghai',
-  city: 'Shanghai',
+  city: '北京',
+  province: '北京',
   country: 'CN',
-  longitude: 121.5,
-  latitude: 31.2,
-  timePrecision: 'minute' as BirthRequest['time_precision'],
+  longitude: 116.42,
+  latitude: 39.93,
+  timePrecision: 'minute' as NonNullable<BirthRequest['time_precision']>,
   uncertaintyMinutes: 0,
   calculationProfileId: 'ziping_standard_v1',
-  userFocus: [] as string[],
+  userFocus: ['命局结构', '事业财运', '感情关系'],
 })
 
 onMounted(() => {
-  // Try to restore a draft from localStorage
-  const draft = localStorage.getItem('bazi:draft:birth')
-  if (draft) {
-    try {
-      Object.assign(form.value, JSON.parse(draft))
-    } catch {
-      // ignore corrupt drafts
-    }
+  const draft = localStorage.getItem(draftKey)
+  if (!draft) return
+  try {
+    Object.assign(form.value, JSON.parse(draft))
+  } catch {
+    localStorage.removeItem(draftKey)
   }
 })
 
+const locationText = computed(() => `${form.value.city || '未知地区'} · ${form.value.timezone}`)
+const coordinateText = computed(() => `北纬 ${Math.abs(form.value.latitude).toFixed(2)}°　东经 ${Math.abs(form.value.longitude).toFixed(2)}°`)
+const canSubmit = computed(() => Boolean(form.value.birthDate && form.value.birthTime && form.value.timezone && form.value.city))
+const birthMonths = Array.from({ length: 12 }, (_, index) => index + 1)
+
 function persistDraft() {
-  localStorage.setItem('bazi:draft:birth', JSON.stringify(form.value))
+  localStorage.setItem(draftKey, JSON.stringify(form.value))
+}
+
+function readBirthDateParts() {
+  const [yearText, monthText, dayText] = form.value.birthDate.split('-')
+  const year = Number(yearText)
+  const month = Number(monthText)
+  const day = Number(dayText)
+  return {
+    year: Number.isInteger(year) && year >= 1 ? year : 1990,
+    month: Number.isInteger(month) && month >= 1 && month <= 12 ? month : 1,
+    day: Number.isInteger(day) && day >= 1 ? day : 1,
+  }
+}
+
+function writeBirthDate(year: number, month: number, day: number) {
+  const safeMonth = Math.min(12, Math.max(1, month))
+  const maxDay = new Date(year, safeMonth, 0).getDate()
+  const safeDay = Math.min(maxDay, Math.max(1, day))
+  form.value.birthDate = `${String(year).padStart(4, '0')}-${String(safeMonth).padStart(2, '0')}-${String(safeDay).padStart(2, '0')}`
+  persistDraft()
+}
+
+const birthYear = computed<number>({
+  get: () => readBirthDateParts().year,
+  set: (year) => {
+    const { month, day } = readBirthDateParts()
+    writeBirthDate(year, month, day)
+  },
+})
+
+const birthMonth = computed<number>({
+  get: () => readBirthDateParts().month,
+  set: (month) => {
+    const { year, day } = readBirthDateParts()
+    writeBirthDate(year, month, day)
+  },
+})
+
+const birthDay = computed<number>({
+  get: () => readBirthDateParts().day,
+  set: (day) => {
+    const { year, month } = readBirthDateParts()
+    writeBirthDate(year, month, day)
+  },
+})
+
+const birthYears = computed(() => {
+  const selectedYear = birthYear.value
+  const minYear = Math.min(1900, selectedYear)
+  const maxYear = Math.max(currentYear, selectedYear)
+  return Array.from({ length: maxYear - minYear + 1 }, (_, index) => maxYear - index)
+})
+
+const birthDays = computed(() => {
+  const { year, month } = readBirthDateParts()
+  return Array.from({ length: new Date(year, month, 0).getDate() }, (_, index) => index + 1)
+})
+
+function toggleAdvanced(event: Event) {
+  showAdvanced.value = (event.currentTarget as HTMLDetailsElement).open
 }
 
 function buildRequest(): BirthRequest {
-  const req: BirthRequest = {
+  const request: BirthRequest = {
     schema_version: 'birth-request-v1',
     gender: form.value.gender,
     birth_datetime_local: `${form.value.birthDate}T${form.value.birthTime}:00`,
     timezone: form.value.timezone,
     birthplace: {
       country: form.value.country,
+      province: form.value.province,
       city: form.value.city,
       longitude: form.value.longitude,
       latitude: form.value.latitude,
     },
     calculation_profile_id: form.value.calculationProfileId,
+    time_precision: form.value.timePrecision,
+    user_focus: form.value.userFocus,
   }
-  // Only attach optional fields when they have meaningful values, to keep
-  // exactOptionalPropertyTypes happy.
-  if (form.value.timePrecision) req.time_precision = form.value.timePrecision
-  if (form.value.uncertaintyMinutes) req.uncertainty_minutes = form.value.uncertaintyMinutes
-  if (form.value.userFocus.length) req.user_focus = form.value.userFocus
-  return req
+  if (form.value.uncertaintyMinutes > 0) request.uncertainty_minutes = form.value.uncertaintyMinutes
+  return request
 }
 
-const isStepValid = computed(() => {
-  if (step.value === 1) return form.value.gender !== undefined
-  if (step.value === 2) return !!form.value.birthDate && !!form.value.birthTime && !!form.value.timezone
-  if (step.value === 3) return !!form.value.city && !!form.value.country
-  return true
-})
-
 async function submit() {
+  if (!canSubmit.value || submitting.value) return
   submitError.value = null
   submitting.value = true
   persistDraft()
   try {
-    if (useMocks) {
-      // Designer fast-path: skip network.
-      router.push({ name: 'chart-overview', params: { chartId: 'demo_chart' } })
-      return
-    }
-    const dto = await client.createChart(buildRequest())
-    localStorage.removeItem('bazi:draft:birth')
-    router.push({ name: 'chart-overview', params: { chartId: dto.chart_id } })
-  } catch (e) {
-    if (e instanceof ApiError) {
-      submitError.value = `${e.detail.error_code}: ${e.detail.message_key}`
-    } else {
-      submitError.value = (e as Error).message
-    }
+    const chartId = useMocks
+      ? 'demo_chart'
+      : (await client.createChart(buildRequest())).chart_id
+    localStorage.setItem(chartMetaKey(chartId), JSON.stringify({
+      name: form.value.name.trim() || '未命名命盘',
+      gender: form.value.gender,
+      birthDate: form.value.birthDate,
+      city: form.value.city,
+    }))
+    localStorage.removeItem(draftKey)
+    await router.push({ name: 'chart-overview', params: { chartId } })
+  } catch (cause) {
+    if (cause instanceof ApiError) submitError.value = `${cause.detail.error_code}: ${cause.detail.message_key}`
+    else submitError.value = cause instanceof Error ? cause.message : '排盘失败'
   } finally {
     submitting.value = false
   }
 }
-
-function next() {
-  if (isStepValid.value && step.value < 4) {
-    step.value++
-  }
-  // Always persist (even on invalid step) so partial drafts survive refresh.
-  persistDraft()
-}
-
-function back() {
-  if (step.value > 1) step.value--
-}
 </script>
 
 <template>
-  <section aria-labelledby="wizard-title">
-    <h1 id="wizard-title">新建命盘</h1>
-    <p data-state="step">第 {{ step }} / 4 步</p>
+  <section class="birth-page" aria-labelledby="birth-title">
+    <header class="page-heading compact-heading">
+      <p class="eyebrow">出生信息</p>
+      <h1 id="birth-title">建立命盘</h1>
+      <p>时间和经纬度会直接影响真太阳时与时柱，请尽量准确填写。</p>
+    </header>
 
-    <form @submit.prevent="step === 4 ? submit() : next()">
-      <!-- Step 1: gender -->
-      <fieldset v-if="step === 1">
-        <legend>身份</legend>
-        <label><input type="radio" v-model="form.gender" value="male" /> 男</label>
-        <label><input type="radio" v-model="form.gender" value="female" /> 女</label>
-        <label><input type="radio" v-model="form.gender" value="unspecified" /> 不指定</label>
-      </fieldset>
+    <form class="birth-card card-surface" @submit.prevent="submit">
+      <label class="line-field name-field">
+        <span>姓名</span>
+        <input v-model.trim="form.name" placeholder="请输入姓名或命盘备注" maxlength="30" @change="persistDraft" />
+      </label>
 
-      <!-- Step 2: birth datetime + timezone -->
-      <fieldset v-else-if="step === 2">
-        <legend>出生时间</legend>
-        <label>日期 <input type="date" v-model="form.birthDate" required /></label>
-        <label>时间 <input type="time" v-model="form.birthTime" required /></label>
-        <label>时区 <input v-model="form.timezone" placeholder="Asia/Shanghai" required /></label>
-      </fieldset>
+      <div class="form-split-row">
+        <div class="segmented-control compact" aria-label="性别">
+          <button type="button" :class="{ active: form.gender === 'male' }" @click="form.gender = 'male'; persistDraft()">男</button>
+          <button type="button" :class="{ active: form.gender === 'female' }" @click="form.gender = 'female'; persistDraft()">女</button>
+        </div>
+        <div class="segmented-control compact calendar-choice" aria-label="历法输入">
+          <button type="button" class="active">公历</button>
+          <button type="button" disabled title="后续版本开放农历直接输入">农历</button>
+          <button type="button" disabled title="后续版本开放四柱直接输入">四柱</button>
+        </div>
+      </div>
 
-      <!-- Step 3: birthplace -->
-      <fieldset v-else-if="step === 3">
-        <legend>出生地点</legend>
-        <label>国家 <input v-model="form.country" required /></label>
-        <label>城市 <input v-model="form.city" required /></label>
-        <label>经度 <input type="number" step="0.01" v-model.number="form.longitude" /></label>
-        <label>纬度 <input type="number" step="0.01" v-model.number="form.latitude" /></label>
-      </fieldset>
-
-      <!-- Step 4: advanced -->
-      <fieldset v-else>
-        <legend>高级</legend>
-        <label>精度
-          <select v-model="form.timePrecision">
-            <option value="second">秒</option>
-            <option value="minute">分钟</option>
-            <option value="hour">小时</option>
-            <option value="unknown">未知</option>
-          </select>
+      <div class="datetime-grid">
+        <label>
+          <span>出生日期</span>
+          <div class="birth-date-selects">
+            <select v-model.number="birthYear" aria-label="出生年份">
+              <option v-for="year in birthYears" :key="year" :value="year">{{ year }}年</option>
+            </select>
+            <select v-model.number="birthMonth" aria-label="出生月份">
+              <option v-for="month in birthMonths" :key="month" :value="month">{{ month }}月</option>
+            </select>
+            <select v-model.number="birthDay" aria-label="出生日期">
+              <option v-for="day in birthDays" :key="day" :value="day">{{ day }}日</option>
+            </select>
+          </div>
         </label>
-        <label>误差容忍（分钟） <input type="number" v-model.number="form.uncertaintyMinutes" min="0" /></label>
-        <label>计算口径 <input v-model="form.calculationProfileId" /></label>
-      </fieldset>
+        <label><span>出生时间</span><input v-model="form.birthTime" type="time" required @change="persistDraft" /></label>
+      </div>
 
-      <p v-if="submitError" data-state="error" role="alert">{{ submitError }}</p>
+      <label class="line-field">
+        <span>出生地区</span>
+        <input v-model.trim="form.city" required placeholder="城市" @change="persistDraft" />
+      </label>
+      <div class="birth-preview">
+        <div><span>地区时区</span><strong>{{ locationText }}</strong></div>
+        <div><span>地址经纬</span><strong>{{ coordinateText }}</strong></div>
+        <div><span>计算方式</span><strong>真太阳时校正 · 节气精确交接</strong></div>
+      </div>
 
-      <button type="button" @click="back" :disabled="step === 1 || submitting">上一步</button>
-      <button type="button" data-testid="next" @click="next" :disabled="!isStepValid || submitting">
-        下一步
-      </button>
-      <button v-if="step === 4" type="button" data-testid="submit" @click="submit" :disabled="submitting">
-        {{ submitting ? '提交中…' : '提交并排盘' }}
+      <details class="advanced-form" :open="showAdvanced" @toggle="toggleAdvanced">
+        <summary>高级设置</summary>
+        <div class="advanced-grid">
+          <label><span>时区</span><input v-model.trim="form.timezone" required placeholder="Asia/Shanghai" /></label>
+          <label><span>省份</span><input v-model.trim="form.province" /></label>
+          <label><span>经度</span><input v-model.number="form.longitude" type="number" step="0.01" min="-180" max="180" /></label>
+          <label><span>纬度</span><input v-model.number="form.latitude" type="number" step="0.01" min="-90" max="90" /></label>
+          <label><span>时间精度</span>
+            <select v-model="form.timePrecision">
+              <option value="second">精确到秒</option><option value="minute">精确到分钟</option>
+              <option value="hour">仅知小时</option><option value="unknown">时间不确定</option>
+            </select>
+          </label>
+          <label><span>误差分钟</span><input v-model.number="form.uncertaintyMinutes" type="number" min="0" max="720" /></label>
+        </div>
+      </details>
+
+      <p v-if="submitError" class="inline-error" role="alert">{{ submitError }}</p>
+      <button data-testid="submit" class="full-primary-button" type="submit" :disabled="submitting || !canSubmit">
+        {{ submitting ? '正在排盘…' : '开始排盘' }}
       </button>
     </form>
   </section>
 </template>
+
+<style scoped>
+.birth-date-selects {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr 1fr;
+  gap: 8px;
+}
+
+.birth-date-selects select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 9px 4px;
+  border: 0;
+  border-bottom: 1px solid #ebe8e2;
+  border-radius: 0;
+  background: transparent;
+  color: #27241f;
+}
+</style>

@@ -79,7 +79,9 @@ class CalculationProfile:
     combination_means_transformation: bool
     enable_branch_break: bool
     enable_self_punishment: bool
+    relation_rule_profile: str
     shensha_rule_set: str
+    shensha_rule_profile: str
     school: str
     allow_mixed_school: bool
     uncertainty_language_required: bool
@@ -150,7 +152,9 @@ def _parse_profile(raw: dict[str, Any]) -> CalculationProfile:
         combination_means_transformation=bool(raw["relations"]["combination_means_transformation"]),
         enable_branch_break=bool(raw["relations"]["enable_branch_break"]),
         enable_self_punishment=bool(raw["relations"]["enable_self_punishment"]),
+        relation_rule_profile=str(raw["relations"].get("rule_profile", "ziping_conservative_v1")),
         shensha_rule_set=raw["shensha"]["rule_set"],
+        shensha_rule_profile=str(raw["shensha"].get("rule_profile", "ziping_conservative_v1")),
         school=raw["analysis"]["school"],
         allow_mixed_school=bool(raw["analysis"]["allow_mixed_school"]),
         uncertainty_language_required=bool(raw["analysis"]["uncertainty_language_required"]),

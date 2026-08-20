@@ -2,6 +2,7 @@
  * Vitest unit tests for the frontend API client.
  * Verifies:
  * - POST /v1/charts sends Idempotency-Key + X-Request-ID
+ * - authenticated tab requests declare the expected user id
  * - GET /v1/charts/{id} parses success
  * - 4xx/5xx responses throw ApiError with the structured envelope
  */
@@ -19,6 +20,7 @@ describe('BaziClient.createChart', () => {
   let fetchSpy: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
+    sessionStorage.clear()
     fetchSpy = vi.fn()
   })
 
@@ -57,6 +59,26 @@ describe('BaziClient.createChart', () => {
     expect(headers['Content-Type']).toBe('application/json')
     expect(headers['Idempotency-Key']).toMatch(/^idem_/)
     expect(headers['X-Request-ID']).toMatch(/^req_/)
+    expect(headers['X-Bazi-Expected-User-ID']).toBeUndefined()
+  })
+
+  it('binds authenticated requests to the tab user id', async () => {
+    sessionStorage.setItem('bazi:current-user', JSON.stringify({
+      user_id: 'user-123',
+      username: 'tester',
+      role: 'user',
+      enabled: true,
+      approval_status: 'approved',
+      must_change_password: false,
+      created_at: '2026-01-01T00:00:00Z',
+    }))
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ charts: [], reports: [] }))
+
+    const client = new BaziClient({ baseUrl: '/api', fetcher: fetchSpy as unknown as typeof fetch })
+    await client.getHistory()
+
+    const headers = (fetchSpy.mock.calls[0][1]?.headers ?? {}) as Record<string, string>
+    expect(headers['X-Bazi-Expected-User-ID']).toBe('user-123')
   })
 
   it('returns the chart DTO on 201', async () => {
@@ -118,6 +140,8 @@ describe('BaziClient.createChart', () => {
 })
 
 describe('BaziClient.getChart', () => {
+  beforeEach(() => sessionStorage.clear())
+
   it('encodes chartId', async () => {
     const fetchSpy = vi.fn().mockResolvedValueOnce(
       jsonResponse({

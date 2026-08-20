@@ -14,7 +14,7 @@ from ..api.dto import JobEventDTO, StructuredAnalysisDTO
 TERMINAL_STAGES = frozenset({"completed", "failed", "cancelled"})
 TRANSITIONS: dict[str, frozenset[str]] = {
     "queued": frozenset({"calculating", "cancelled"}),
-    "calculating": frozenset({"retrieving", "failed", "cancelled"}),
+    "calculating": frozenset({"retrieving", "interpreting", "failed", "cancelled"}),
     "retrieving": frozenset({"interpreting", "failed", "cancelled"}),
     "interpreting": frozenset({"verifying", "failed", "cancelled"}),
     "verifying": frozenset({"revision_pending", "report_building", "failed", "cancelled"}),
@@ -73,6 +73,7 @@ class InMemoryAnalysisStore:
         self._reports: dict[str, dict[str, Any]] = {}
         self._analyses: dict[str, StructuredAnalysisDTO] = {}
         self._shares: dict[str, ShareRecord] = {}
+        self._traces: dict[str, dict[str, Any]] = {}
 
     def create(
         self, *, chart_id: str, user_focus: tuple[str, ...], school: str, idempotency_key: str
@@ -128,6 +129,25 @@ class InMemoryAnalysisStore:
             self._append_event(updated, retryable=retryable, safe_details=safe_details)
             return updated
 
+    def heartbeat(
+        self,
+        job_id: str,
+        *,
+        progress: int,
+        safe_details: dict[str, Any] | None = None,
+    ) -> AnalysisJob:
+        """Persist a same-stage progress event without weakening transition rules."""
+        with self._lock:
+            current = self._jobs.get(job_id)
+            if current is None:
+                raise JobStateError("job not found")
+            if current.stage in TERMINAL_STAGES:
+                return current
+            updated = replace(current, progress=max(current.progress, progress))
+            self._jobs[job_id] = updated
+            self._append_event(updated, retryable=True, safe_details=safe_details)
+            return updated
+
     def request_cancel(self, job_id: str) -> AnalysisJob:
         with self._lock:
             job = self._jobs.get(job_id)
@@ -149,15 +169,25 @@ class InMemoryAnalysisStore:
             return tuple(event for event in events if int(event.event_id) > int(last_event_id))
 
     def save_result(
-        self, analysis: StructuredAnalysisDTO, report_view: dict[str, Any]
+        self,
+        analysis: StructuredAnalysisDTO,
+        report_view: dict[str, Any],
+        generation_trace: dict[str, Any] | None = None,
     ) -> None:
         with self._lock:
             self._analyses[analysis.analysis_id] = analysis
-            self._reports[str(report_view["report_id"])] = report_view
+            report_id = str(report_view["report_id"])
+            self._reports[report_id] = report_view
+            if generation_trace is not None:
+                self._traces[report_id] = generation_trace
 
     def get_report(self, report_id: str) -> dict[str, Any] | None:
         with self._lock:
             return self._reports.get(report_id)
+
+    def get_report_trace(self, report_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            return self._traces.get(report_id)
 
     def get_analysis(self, analysis_id: str) -> StructuredAnalysisDTO | None:
         with self._lock:
@@ -180,6 +210,9 @@ class InMemoryAnalysisStore:
             )
             self._shares[record.share_id] = record
             return record, token
+
+    def get_share(self, share_id: str) -> ShareRecord | None:
+        return self._shares.get(share_id)
 
     def revoke_share(self, share_id: str) -> ShareRecord:
         with self._lock:
