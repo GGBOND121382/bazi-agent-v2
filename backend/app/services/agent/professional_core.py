@@ -699,6 +699,7 @@ def _substantive_items(items: list[dict[str, Any]]) -> int:
         "conclusion",
         "summary",
         "analysis",
+        "assessment",
         "statement",
         "title",
         "relation",
