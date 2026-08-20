@@ -359,6 +359,14 @@ def _semantic_rule_errors(
                     )
 
         for match in _ELEMENT_ACTION.finditer(text):
+            # “乙木生申月” means “born in the Shen month”, not “wood generates metal”.
+            if (
+                match.group("action") == "生"
+                and match.group("right") in EARTHLY_BRANCHES
+                and match.group(0).endswith(match.group("right"))
+                and text[match.end():].startswith("月")
+            ):
+                continue
             check_element_relation(
                 left=match.group("left"),
                 right=match.group("right"),
