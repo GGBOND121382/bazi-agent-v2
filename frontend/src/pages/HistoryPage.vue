@@ -20,7 +20,7 @@ const { data, isLoading, isError, error } = useQuery<HistoryDTO>({
   queryFn: () => client.getHistory(),
 })
 
-type ChartMeta = { name?: string; gender?: string; birthDate?: string; city?: string }
+type ChartMeta = { name?: string | undefined; gender?: string | undefined; birthDate?: string | undefined; city?: string | undefined }
 function localMetaFor(chartId: string): ChartMeta {
   const raw = localStorage.getItem(chartMetaKey(chartId))
   if (!raw) return {}
